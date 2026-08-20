@@ -1,6 +1,6 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Slot } from "./contracts.shared";
@@ -132,6 +132,57 @@ function codexMcpNames(configPath: string): string[] {
   }
 }
 
+const CLAUDE_PRIMARY = join(HOME, ".claude.json");
+const CODEX_PRIMARY = join(HOME, ".codex", "config.toml");
+
+type ClaudeMcpDef = {
+  type?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+};
+
+function claudeMcpDefs(): Record<string, ClaudeMcpDef> {
+  const config = readJson(CLAUDE_PRIMARY);
+  return (config?.mcpServers as Record<string, ClaudeMcpDef> | undefined) ?? {};
+}
+
+function backupFile(path: string): void {
+  if (!existsSync(path)) return;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  copyFileSync(path, `${path}.bak-superpowers-${stamp}`);
+}
+
+function writeJsonAtomic(path: string, value: unknown): void {
+  const tmp = `${path}.tmp-superpowers`;
+  writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
+  renameSync(tmp, path);
+}
+
+// Extract one [mcp_servers.<name>] block (with subtables) from codex TOML.
+function codexServerBlock(text: string, name: string): { start: number; end: number } | null {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const header = new RegExp(`^\\[mcp_servers\\.${escaped}(?:\\.[^\\]]+)?\\]`, "m");
+  const startMatch = header.exec(text);
+  if (!startMatch) return null;
+  const start = startMatch.index;
+  const rest = text.slice(start);
+  const next = rest.split("\n").findIndex((line, index) => {
+    if (index === 0) return false;
+    const isHeader = /^\s*\[/.test(line);
+    return isHeader && !new RegExp(`^\\s*\\[mcp_servers\\.${escaped}[.\\]]`).test(line);
+  });
+  if (next === -1) return { start, end: text.length };
+  const offset = rest.split("\n").slice(0, next).join("\n").length + 1;
+  return { start, end: start + offset };
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value); // valid TOML basic string
+}
+
 export async function handleScan(_input: Record<string, never>, { paseo }: PluginHandlerContext) {
   const { config } = await paseo.config.get();
   const overrides = ((config as { agents?: { providers?: ProviderOverrides } }).agents?.providers ??
@@ -194,6 +245,112 @@ export async function handleMcpOverview() {
     primaryCodexServers: primaryCodex.length,
     slots,
   };
+}
+
+export async function handleMcpList() {
+  const claudeDefs = claudeMcpDefs();
+  const codexNames = codexMcpNames(CODEX_PRIMARY);
+  const slots = collectSlots();
+  const claudeSlots = slots.filter((slot) => slot.provider === "claude");
+  const codexSlots = slots.filter((slot) => slot.provider === "codex");
+  const slotNames = new Map<string, Set<string>>();
+  for (const slot of claudeSlots) {
+    slotNames.set(slot.dir, new Set(claudeMcpNames(join(slot.dir, ".claude.json"))));
+  }
+  for (const slot of codexSlots) {
+    slotNames.set(slot.dir, new Set(codexMcpNames(join(slot.dir, "config.toml"))));
+  }
+  const allNames = [...new Set([...Object.keys(claudeDefs), ...codexNames])].sort();
+  const servers = allNames.map((name) => {
+    const def = claudeDefs[name];
+    const definedIn: Array<"claude" | "codex"> = [];
+    if (def) definedIn.push("claude");
+    if (codexNames.includes(name)) definedIn.push("codex");
+    const transport: "stdio" | "http" | "sse" | "unknown" = def?.command
+      ? "stdio"
+      : def?.type === "sse"
+        ? "sse"
+        : def?.url
+          ? "http"
+          : definedIn.includes("codex")
+            ? "stdio"
+            : "unknown";
+    // Key names only — env/header VALUES never leave the handler.
+    const hasInline = Boolean(
+      (def?.env && Object.keys(def.env).length > 0) || (def?.headers && Object.keys(def.headers).length > 0),
+    );
+    const detail = def?.command
+      ? [def.command, ...(def.args ?? [])].join(" ").slice(0, 80)
+      : (def?.url ?? "defined in codex config.toml").slice(0, 80);
+    const cover = (group: typeof claudeSlots) =>
+      `${group.filter((slot) => slotNames.get(slot.dir)?.has(name)).length}/${group.length}`;
+    return {
+      name,
+      definedIn,
+      transport,
+      detail,
+      authStyle: hasInline ? ("inline-credentials" as const) : ("oauth-or-none" as const),
+      claudeSlotCoverage: cover(claudeSlots),
+      codexSlotCoverage: cover(codexSlots),
+    };
+  });
+  return { servers };
+}
+
+export async function handleMcpCopy({ name, from, to }: { name: string; from: "claude" | "codex"; to: "claude" | "codex" }) {
+  if (from === to) return { ok: false, message: "source and target are the same provider" };
+  if (from === "codex") {
+    return { ok: false, message: "codex → claude copy is not supported yet — add it in claude with: claude mcp add" };
+  }
+  const def = claudeMcpDefs()[name];
+  if (!def) return { ok: false, message: `no claude definition for '${name}'` };
+  if (!def.command) {
+    return { ok: false, message: `'${name}' is ${def.url ? "an HTTP/SSE" : "a non-stdio"} server — codex runs stdio MCP servers only` };
+  }
+  let text = "";
+  try {
+    text = readFileSync(CODEX_PRIMARY, "utf8");
+  } catch {
+    return { ok: false, message: `cannot read ${CODEX_PRIMARY}` };
+  }
+  if (codexServerBlock(text, name)) return { ok: false, message: `'${name}' already exists in codex config` };
+  backupFile(CODEX_PRIMARY);
+  const lines = [`\n[mcp_servers.${name}]`, `command = ${tomlString(def.command)}`];
+  if (def.args?.length) lines.push(`args = [${def.args.map(tomlString).join(", ")}]`);
+  if (def.env && Object.keys(def.env).length > 0) {
+    lines.push(`[mcp_servers.${name}.env]`);
+    for (const [key, value] of Object.entries(def.env)) lines.push(`${key} = ${tomlString(value)}`);
+  }
+  writeFileSync(CODEX_PRIMARY, `${text.replace(/\n*$/, "\n")}${lines.join("\n")}\n`);
+  return { ok: true, message: `'${name}' added to codex config (backup saved). Run sync to push it into slots.` };
+}
+
+export async function handleMcpRemove({ name, from }: { name: string; from: "claude" | "codex" }) {
+  if (from === "claude") {
+    const config = readJson(CLAUDE_PRIMARY);
+    const servers = (config?.mcpServers as Record<string, unknown> | undefined) ?? {};
+    if (!config || !(name in servers)) return { ok: false, message: `no claude definition for '${name}'` };
+    backupFile(CLAUDE_PRIMARY);
+    delete servers[name];
+    config.mcpServers = servers;
+    writeJsonAtomic(CLAUDE_PRIMARY, config);
+    return { ok: true, message: `'${name}' removed from claude config (backup saved). Sync to propagate to slots. Note: a running Claude Code session may rewrite this file from memory.` };
+  }
+  let text = "";
+  try {
+    text = readFileSync(CODEX_PRIMARY, "utf8");
+  } catch {
+    return { ok: false, message: `cannot read ${CODEX_PRIMARY}` };
+  }
+  let block = codexServerBlock(text, name);
+  if (!block) return { ok: false, message: `no codex definition for '${name}'` };
+  backupFile(CODEX_PRIMARY);
+  while (block) {
+    text = text.slice(0, block.start) + text.slice(block.end);
+    block = codexServerBlock(text, name);
+  }
+  writeFileSync(CODEX_PRIMARY, text);
+  return { ok: true, message: `'${name}' removed from codex config (backup saved). Sync to propagate to slots.` };
 }
 
 export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {

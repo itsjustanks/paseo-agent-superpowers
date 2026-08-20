@@ -62,3 +62,32 @@ export const mcpSync = defineRpc({
   input: z.object({}),
   output: z.object({ ok: z.boolean(), log: z.string() }),
 });
+
+export const McpServerSchema = z.object({
+  name: z.string(),
+  definedIn: z.array(z.enum(["claude", "codex"])),
+  transport: z.enum(["stdio", "http", "sse", "unknown"]),
+  detail: z.string(),
+  authStyle: z.enum(["inline-credentials", "oauth-or-none"]),
+  claudeSlotCoverage: z.string(),
+  codexSlotCoverage: z.string(),
+});
+export type McpServer = z.infer<typeof McpServerSchema>;
+
+export const mcpList = defineRpc({
+  name: "superpowers.mcp-list",
+  input: z.object({}),
+  output: z.object({ servers: z.array(McpServerSchema) }),
+});
+
+export const mcpCopy = defineRpc({
+  name: "superpowers.mcp-copy",
+  input: z.object({ name: z.string(), from: z.enum(["claude", "codex"]), to: z.enum(["claude", "codex"]) }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+export const mcpRemove = defineRpc({
+  name: "superpowers.mcp-remove",
+  input: z.object({ name: z.string(), from: z.enum(["claude", "codex"]) }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
