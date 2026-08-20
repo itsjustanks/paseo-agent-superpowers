@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { diagnoseProvider, mcpOverview, mcpSync, scan, wireProvider, type Slot } from "./contracts";
+import { diagnoseProvider, mcpOverview, mcpSync, scan, wireProvider, type Slot } from "./contracts.shared";
 
 export function MainSurface({ theme, layout }: PluginSurfaceProps) {
   const queryClient = useQueryClient();
