@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { diagnoseProvider, scan, wireProvider, type Slot } from "./contracts.shared";
+import { diagnoseProvider, providerHealth, scan, wireProvider, type Slot } from "./contracts.shared";
 import { Badge, Btn, Dot, makeStyles } from "./ui.client";
 
 export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
@@ -11,7 +11,10 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const callScan = useRpc(scan);
   const callWire = useRpc(wireProvider);
   const callDiagnose = useRpc(diagnoseProvider);
+  const callHealth = useRpc(providerHealth);
   const [diagnosis, setDiagnosis] = useState<Record<string, string>>({});
+  const [health, setHealth] = useState<Array<{ id: string; label: string; ok: boolean; summary: string }> | null>(null);
+  const [healthRunning, setHealthRunning] = useState(false);
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
 
   const scanQuery = useQuery({ queryKey: ["superpowers", "scan"], queryFn: () => callScan({}) });
@@ -103,6 +106,36 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       ))}
 
       {wireMutation.error ? <Text style={styles.danger}>{String(wireMutation.error)}</Text> : null}
+
+      <View style={styles.headerRow}>
+        <Text style={styles.strong}>Provider health</Text>
+        <Btn
+          label={healthRunning ? "Checking…" : "Run health check"}
+          kind="quiet"
+          theme={theme}
+          disabled={healthRunning}
+          onPress={() => {
+            setHealthRunning(true);
+            void callHealth({})
+              .then((result) => setHealth(result.providers))
+              .finally(() => setHealthRunning(false));
+          }}
+        />
+      </View>
+      {health ? (
+        <View style={styles.card}>
+          {health.map((provider) => (
+            <View key={provider.id} style={styles.row}>
+              <Dot color={provider.ok ? theme.colors.accent : theme.colors.statusDanger} />
+              <Text style={styles.strong}>{provider.id}</Text>
+              <Text style={provider.ok ? styles.muted : styles.danger}>{provider.summary}</Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.muted}>Runs Paseo's own diagnostic on every enabled provider (claude, codex, kimi, grok + custom).</Text>
+      )}
+
       {scanQuery.data && !scanQuery.data.agentAuthInstalled ? (
         <Text style={styles.danger}>
           agent-auth CLI not found — install it for logins: github.com/itsjustanks/agent-auth

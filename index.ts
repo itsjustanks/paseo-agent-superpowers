@@ -1,13 +1,24 @@
 import type { PluginContext } from "@getpaseo/plugin";
 import { AgentSyncSurface } from "./agents.client";
-import { diagnoseProvider, mcpCopy, mcpList, mcpOverview, mcpRemove, mcpSync, scan, wireProvider } from "./contracts.shared";
+import {
+  diagnoseProvider,
+  mcpAdd,
+  mcpApply,
+  mcpMatrix,
+  mcpRemove,
+  mcpSync,
+  providerHealth,
+  scan,
+  wireProvider,
+} from "./contracts.shared";
 import {
   handleDiagnoseProvider,
-  handleMcpCopy,
-  handleMcpList,
-  handleMcpOverview,
+  handleMcpAdd,
+  handleMcpApply,
+  handleMcpMatrix,
   handleMcpRemove,
   handleMcpSync,
+  handleProviderHealth,
   handleScan,
   handleWireProvider,
 } from "./handlers.server";
@@ -17,31 +28,22 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(scan, handleScan);
   plugin.handle(wireProvider, handleWireProvider);
   plugin.handle(diagnoseProvider, handleDiagnoseProvider);
-  plugin.handle(mcpOverview, handleMcpOverview);
-  plugin.handle(mcpList, handleMcpList);
-  plugin.handle(mcpCopy, handleMcpCopy);
+  plugin.handle(providerHealth, handleProviderHealth);
+  plugin.handle(mcpMatrix, handleMcpMatrix);
+  plugin.handle(mcpAdd, handleMcpAdd);
+  plugin.handle(mcpApply, handleMcpApply);
   plugin.handle(mcpRemove, handleMcpRemove);
   plugin.handle(mcpSync, handleMcpSync);
 
   plugin.addSurface("agent-sync", AgentSyncSurface);
   plugin.addSurface("mcp", McpSurface);
-  plugin.addSidebarItem({
-    id: "agent-sync",
-    title: "Agent Sync",
-    icon: "Users",
-    surface: "agent-sync",
-  });
-  plugin.addSidebarItem({
-    id: "mcp",
-    title: "MCP",
-    icon: "Plug",
-    surface: "mcp",
-  });
+  plugin.addSidebarItem({ id: "agent-sync", title: "Agent Sync", icon: "Users", surface: "agent-sync" });
+  plugin.addSidebarItem({ id: "mcp", title: "MCP", icon: "Plug", surface: "mcp" });
   plugin.addCommandCenterItem({
     id: "open-agent-sync",
-    title: "Open Agent Sync (accounts)",
+    title: "Open Agent Sync (accounts & provider health)",
     icon: "Users",
-    keywords: ["accounts", "providers", "auth", "agent-auth"],
+    keywords: ["accounts", "providers", "auth", "health", "agent-auth"],
     context: "global",
     onSelect({ openSurface }) {
       openSurface("agent-sync");
@@ -51,7 +53,7 @@ export default function contribute(plugin: PluginContext) {
     id: "open-mcp",
     title: "Open MCP management",
     icon: "Plug",
-    keywords: ["mcp", "servers", "sync"],
+    keywords: ["mcp", "servers", "add", "sync"],
     context: "global",
     onSelect({ openSurface }) {
       openSurface("mcp");
