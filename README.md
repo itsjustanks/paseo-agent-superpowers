@@ -20,7 +20,7 @@ A universal manager for **user-level** MCP servers across every provider on the 
 - **Health check** — HTTP servers get a real request (a 401/403 is reported as **auth needed**, which is the honest answer to "does this need authorizing?"); stdio servers get a binary-on-PATH check. 🟢 / 🟠 / 🔴 per server.
 - **Expand** a server for its destination table: present or missing per destination, add or remove there
 - **Edit** — every destination's own definition, side by side. Different auth per account is expected and supported: change one account's header and save just that destination, or take one destination's version and **Use for ALL**.
-- **Reveal secrets** — masked (`•••last4`) by default; one tap shows the stored values. Masked values are preserved on save, so you can never accidentally copy one account's token into another.
+- **Reveal secrets** — masked (`•••last4`) by default; one tap shows the stored values. Masked values are preserved on save, so editing one account can never copy its token into another. (Deliberate cross-account copies — **Add to all** and **Use for ALL** — do carry a definition's inline credentials, which is the point of those buttons.)
 - **Rename everywhere** — rewrites a server's key across every config that has it (copy-then-delete, so a failure can never lose the definition)
 - **Add server** — http or stdio, headers/env as `KEY=VALUE` lines, targeting all destinations or specific ones
 - **Sync accounts** — pushes user-level definitions and project trust from each primary into its account slots
