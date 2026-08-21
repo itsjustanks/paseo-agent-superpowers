@@ -11,6 +11,8 @@ One card per provider connector — **Claude Code, Codex, Kimi Code, Grok** — 
 - the **primary** account (the login your plain `claude` / `codex` uses), shown by email
 - every **account slot** with live state: 🟢 logged in · 🟠 login needed · 🔴 wrong account (the slot folder says one email, the login inside is another)
 - a **pool summary** — "5 logged-in entries → 4 independent quota pools" — and a ⚠ badge on any two entries signed into the *same* account, since a rate limit belongs to an account, not to a slot
+- **Auto-router** — one click wires a single `Claude (Agent Auth)` / `Codex (Agent Auth)` provider that sends each new agent to the least-recently-used live account. Pick that one provider and your accounts get used automatically; a running agent is never re-routed.
+- **Park 3h / Resume** — take an account that hit its limit out of rotation and put it back
 - **Wire into Paseo** — one click adds that account as a Paseo custom provider (`extends` the native integration, pointing `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at the slot). Each wired account is an independent quota pool: five agents across three Claude accounts genuinely run on three separate rate limits. A banner reminds you Paseo loads new providers at the next daemon restart.
 
 ## 🔌 MCP
@@ -52,7 +54,13 @@ The MCP tab manages **user-level** (global) servers — each provider's own conf
 
 ## About rate limits and failover
 
-Paseo has no automatic provider failover: an agent that hits a usage limit stops with an error and keeps its workspace — it does not move itself to another account. Multiple pools help in two ways: an orchestrator can re-dispatch the stalled work to a sibling pool without any account switching, and independent agents can run on separate limits from the start. This tab makes the pool count explicit so you know what you actually have.
+Paseo has no automatic provider failover: an agent that hits a usage limit stops with an error and keeps its workspace — it does not move itself to another account. Three things reduce the pain, and the tab exposes all of them:
+
+- **Auto-router** — one provider that picks a live account per launch, so agents spread across accounts without you choosing
+- **Park / Resume** — take an exhausted account out of rotation; new agents skip it until it recovers
+- **Pool count** — see how many *independent* limits you actually have, with duplicates flagged
+
+A running agent still keeps the account it started on; nothing re-routes mid-task (that is what breaks sessions).
 
 Paseo's built-in usage figure reads the primary accounts only (`~/.claude`, `~/.codex`); it does not see per-account slots. Per-pool usage percentages would require reading each account's access token, which this plugin deliberately does not do.
 

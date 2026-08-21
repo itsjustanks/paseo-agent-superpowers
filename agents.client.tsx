@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { diagnoseProvider, providerHealth, scan, wireProvider, type Slot } from "./contracts.shared";
+import { diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
 import { Badge, Btn, Dot, STATUS, makeStyles } from "./ui.client";
 
 export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
@@ -12,7 +12,10 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const callWire = useRpc(wireProvider);
   const callDiagnose = useRpc(diagnoseProvider);
   const callHealth = useRpc(providerHealth);
+  const callWireAuto = useRpc(wireAuto);
+  const callCooldown = useRpc(setCooldown);
   const [diagnosis, setDiagnosis] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<string | null>(null);
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
 
   const scanQuery = useQuery({ queryKey: ["superpowers", "scan"], queryFn: () => callScan({}) });
@@ -22,6 +25,20 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const wireMutation = useMutation({
     mutationFn: (slot: Slot) => callWire({ provider: slot.provider, email: slot.email, dir: slot.dir }),
     onSuccess: refresh,
+  });
+  const autoMutation = useMutation({
+    mutationFn: (provider: "claude" | "codex") => callWireAuto({ provider }),
+    onSuccess: (result) => {
+      setNotice(result.message);
+      refresh();
+    },
+  });
+  const cooldownMutation = useMutation({
+    mutationFn: (input: { provider: "claude" | "codex"; email: string; minutes: number }) => callCooldown(input),
+    onSuccess: (result) => {
+      setNotice(result.message);
+      refresh();
+    },
   });
 
   const slots = scanQuery.data?.slots ?? [];
@@ -74,6 +91,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     rows: React.ReactNode,
   ) => {
     const health = healthById.get(provider);
+    const auto = (scanQuery.data?.autoRouters ?? []).find((entry) => entry.provider === provider);
     return (
       <View key={provider} style={styles.card}>
         <View style={styles.rowBetween}>
@@ -85,6 +103,21 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           {diagnoseBtn(provider, provider)}
         </View>
         {diagnosis[provider] ? <Text style={styles.monoText}>{diagnosis[provider]}</Text> : null}
+        {auto ? (
+          <View style={tableRow}>
+            <Dot color={auto.wiredProviderId ? STATUS.green : theme.colors.foregroundMuted} />
+            <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
+              Auto-router — one provider that spreads new agents across these accounts
+            </Text>
+            {auto.wiredProviderId ? (
+              <Badge label={auto.wiredProviderId} theme={theme} tone="accent" />
+            ) : auto.launcherExists ? (
+              <Btn label="Wire auto-router" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
+            ) : (
+              <Text style={styles.muted}>run `agent-auth auto` to enable</Text>
+            )}
+          </View>
+        ) : null}
         {rows}
       </View>
     );
@@ -101,6 +134,28 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       {!slot.loggedIn ? <Badge label="login needed" theme={theme} tone="danger" /> : null}
       {slot.loggedIn && isShared(slot.provider, slot.actualEmail || slot.email) ? (
         <Badge label="⚠ same account as another entry — one shared quota" theme={theme} tone="danger" />
+      ) : null}
+      {slot.cooldownUntil > 0 ? (
+        <>
+          <Badge
+            label={`parked ${Math.max(1, Math.round((slot.cooldownUntil * 1000 - Date.now()) / 60000))}m`}
+            theme={theme}
+            tone="danger"
+          />
+          <Btn
+            label="Resume"
+            kind="quiet"
+            theme={theme}
+            onPress={() => cooldownMutation.mutate({ provider: slot.provider, email: slot.email, minutes: 0 })}
+          />
+        </>
+      ) : slot.loggedIn ? (
+        <Btn
+          label="Park 3h"
+          kind="quiet"
+          theme={theme}
+          onPress={() => cooldownMutation.mutate({ provider: slot.provider, email: slot.email, minutes: 180 })}
+        />
       ) : null}
       {slot.wiredProviderId ? (
         <>
@@ -149,7 +204,9 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
         <Text style={styles.muted}>
           A rate limit belongs to an account, so entries signed into the same account share one limit. Paseo does not fail
           over on its own: an agent that hits a limit stops and keeps its workspace — an orchestrator (or you) re-dispatches
-          it to another pool. Paseo's own usage figure tracks the primary accounts only, not these pools.
+          it to another pool. Paseo's own usage figure tracks the primary accounts only, not these pools. Wire the
+          auto-router and new agents spread across accounts by themselves; park an account that hits its limit and
+          routing skips it until it recovers.
         </Text>
       </View>
 
@@ -160,6 +217,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           </Text>
         </View>
       ) : null}
+      {notice ? <Text style={styles.monoText}>{notice}</Text> : null}
       {scanQuery.error ? <Text style={styles.danger}>{String(scanQuery.error)}</Text> : null}
       {wireMutation.error ? <Text style={styles.danger}>{String(wireMutation.error)}</Text> : null}
 

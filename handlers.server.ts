@@ -1,6 +1,6 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import type { Destination, Slot } from "./contracts.shared";
@@ -99,8 +99,8 @@ function envVarFor(provider: "claude" | "codex"): string {
   return provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
 }
 
-function collectSlots(): Array<Omit<Slot, "wiredProviderId">> {
-  const slots: Array<Omit<Slot, "wiredProviderId">> = [];
+function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil">> {
+  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil">> = [];
   const seen = new Set<string>();
   const add = (provider: "claude" | "codex", dir: string, source: "agent-auth" | "external") => {
     if (seen.has(dir)) return;
@@ -508,18 +508,105 @@ async function buildDestinations(paseo: PluginHandlerContext["paseo"]): Promise<
 
 // ---------------------------------------------------------------- handlers
 
+const AGENT_AUTH_HOME_DIR = process.env.AGENT_AUTH_HOME ?? join(HOME, ".agent-auth");
+
+function poolsDir(): string {
+  return join(AGENT_AUTH_HOME_DIR, "state", "pools");
+}
+
+function cooldownUntil(provider: string, email: string): number {
+  try {
+    const raw = readFileSync(join(poolsDir(), `cooldown-${provider}-${email}`), "utf8").trim();
+    const until = Number.parseInt(raw, 10);
+    return Number.isFinite(until) && until * 1000 > Date.now() ? until : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function autoLauncherPath(provider: "claude" | "codex"): string {
+  return join(AGENT_AUTH_HOME_DIR, "bin", `${provider}-auto`);
+}
+
+// A provider is the auto-router for `provider` when its command points at that
+// provider's launcher.
+function autoWiredId(overrides: ProviderOverrides, provider: "claude" | "codex"): string | null {
+  const launcher = autoLauncherPath(provider);
+  for (const [id, override] of Object.entries(overrides)) {
+    const command = (override as { command?: string[] } | undefined)?.command;
+    if (command?.some((part) => part === launcher)) return id;
+  }
+  return null;
+}
+
 export async function handleScan(_input: Record<string, never>, { paseo }: PluginHandlerContext) {
   const overrides = await providerOverrides(paseo);
   const slots = collectSlots().map((slot) => ({
     ...slot,
     wiredProviderId: providerIdForDir(overrides, slot.provider, slot.dir),
+    cooldownUntil: cooldownUntil(slot.provider, slot.email),
+  }));
+  const autoRouters = (["claude", "codex"] as const).map((provider) => ({
+    provider,
+    launcherPath: autoLauncherPath(provider),
+    launcherExists: existsSync(autoLauncherPath(provider)),
+    wiredProviderId: autoWiredId(overrides, provider),
   }));
   return {
     slots,
     primaryAccounts: { claude: claudeAccountEmail(HOME), codex: codexAccountEmail(join(HOME, ".codex")) },
+    autoRouters,
     agentAuthInstalled: agentAuthInstalled(),
     needsRestart,
   };
+}
+
+export async function handleWireAuto({ provider }: { provider: "claude" | "codex" }, { paseo }: PluginHandlerContext) {
+  const launcher = autoLauncherPath(provider);
+  if (!existsSync(launcher)) {
+    return {
+      ok: false,
+      message: `no launcher at ${launcher} — run 'agent-auth auto' in a terminal to create it`,
+    };
+  }
+  const providerId = `${provider}-auto`;
+  await paseo.config.patch({
+    agents: {
+      providers: {
+        [providerId]: {
+          extends: provider,
+          label: `${provider === "claude" ? "Claude" : "Codex"} (Agent Auth)`,
+          description: `Routes each new agent to a live ${provider} account (least-recently-used, skips cooled-down)`,
+          command: [launcher],
+        },
+      },
+    },
+  } as never);
+  needsRestart = true;
+  return { ok: true, message: `'${providerId}' wired — restart the Paseo daemon to load it` };
+}
+
+export async function handleSetCooldown({
+  provider,
+  email,
+  minutes,
+}: {
+  provider: "claude" | "codex";
+  email: string;
+  minutes: number;
+}) {
+  const file = join(poolsDir(), `cooldown-${provider}-${email}`);
+  try {
+    if (minutes <= 0) {
+      rmSync(file, { force: true });
+      return { ok: true, message: `${email} is back in rotation` };
+    }
+    mkdirSync(poolsDir(), { recursive: true });
+    writeFileSync(file, String(Math.floor(Date.now() / 1000) + minutes * 60));
+    return { ok: true, message: `${email} parked for ${minutes}m — auto-routing will skip it` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export async function handleWireProvider(

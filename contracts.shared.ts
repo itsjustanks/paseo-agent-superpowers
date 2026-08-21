@@ -10,8 +10,17 @@ export const SlotSchema = z.object({
   actualEmail: z.string(),
   wrongAccount: z.boolean(),
   wiredProviderId: z.string().nullable(),
+  cooldownUntil: z.number(), // epoch seconds; 0 = available
 });
 export type Slot = z.infer<typeof SlotSchema>;
+
+export const AutoRouterSchema = z.object({
+  provider: z.enum(["claude", "codex"]),
+  launcherPath: z.string(),
+  launcherExists: z.boolean(),
+  wiredProviderId: z.string().nullable(),
+});
+export type AutoRouter = z.infer<typeof AutoRouterSchema>;
 
 export const scan = defineRpc({
   name: "superpowers.scan",
@@ -19,9 +28,22 @@ export const scan = defineRpc({
   output: z.object({
     slots: z.array(SlotSchema),
     primaryAccounts: z.object({ claude: z.string(), codex: z.string() }),
+    autoRouters: z.array(AutoRouterSchema),
     agentAuthInstalled: z.boolean(),
     needsRestart: z.boolean(),
   }),
+});
+
+export const wireAuto = defineRpc({
+  name: "superpowers.wire-auto",
+  input: z.object({ provider: z.enum(["claude", "codex"]) }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+export const setCooldown = defineRpc({
+  name: "superpowers.set-cooldown",
+  input: z.object({ provider: z.enum(["claude", "codex"]), email: z.string(), minutes: z.number() }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
 export const wireProvider = defineRpc({

@@ -12,6 +12,8 @@ import {
   mcpSync,
   providerHealth,
   scan,
+  setCooldown,
+  wireAuto,
   wireProvider,
 } from "./contracts.shared";
 import {
@@ -26,6 +28,8 @@ import {
   handleMcpSync,
   handleProviderHealth,
   handleScan,
+  handleSetCooldown,
+  handleWireAuto,
   handleWireProvider,
 } from "./handlers.server";
 import { McpSurface } from "./mcp.client";
@@ -33,6 +37,8 @@ import { McpSurface } from "./mcp.client";
 export default function contribute(plugin: PluginContext) {
   plugin.handle(scan, handleScan);
   plugin.handle(wireProvider, handleWireProvider);
+  plugin.handle(wireAuto, handleWireAuto);
+  plugin.handle(setCooldown, handleSetCooldown);
   plugin.handle(diagnoseProvider, handleDiagnoseProvider);
   plugin.handle(providerHealth, handleProviderHealth);
   plugin.handle(mcpMatrix, handleMcpMatrix);
