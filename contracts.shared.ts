@@ -114,3 +114,43 @@ export const mcpSync = defineRpc({
   input: z.object({}),
   output: z.object({ ok: z.boolean(), log: z.string() }),
 });
+
+// Editable view of one server. Secret values are MASKED (•••last4); an edit
+// that keeps a masked value keeps the stored secret.
+export const mcpDef = defineRpc({
+  name: "superpowers.mcp-def",
+  input: z.object({ name: z.string() }),
+  output: z.object({
+    found: z.boolean(),
+    kind: z.enum(["stdio", "http"]),
+    command: z.string(),
+    url: z.string(),
+    kvMasked: z.string(), // one KEY=•••xxxx per line (env for stdio, headers for http)
+  }),
+});
+
+export const mcpEdit = defineRpc({
+  name: "superpowers.mcp-edit",
+  input: z.object({
+    name: z.string(),
+    kind: z.enum(["stdio", "http"]),
+    command: z.string().optional(),
+    url: z.string().optional(),
+    kvLines: z.string().optional(), // masked values (•••…) keep the stored secret
+    targets: z.array(z.string()).min(1),
+  }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+export const McpHealthSchema = z.object({
+  name: z.string(),
+  status: z.enum(["ok", "auth-required", "warn", "down", "binary-missing", "unknown"]),
+  note: z.string(),
+});
+export type McpHealth = z.infer<typeof McpHealthSchema>;
+
+export const mcpHealth = defineRpc({
+  name: "superpowers.mcp-health",
+  input: z.object({}),
+  output: z.object({ results: z.array(McpHealthSchema) }),
+});

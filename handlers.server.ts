@@ -602,6 +602,124 @@ export async function handleMcpRemove({ name, targets }: { name: string; targets
   };
 }
 
+function findDef(destinations: Destination[], name: string): McpDef | null {
+  let def: McpDef | null = null;
+  for (const dest of destinations) {
+    const candidate =
+      dest.format === "json-mcp" ? jsonMcpRead(dest.configPath)[name] : tomlMcpReadOne(dest.configPath, name);
+    if (candidate) {
+      def = candidate;
+      if (dest.format === "json-mcp") break;
+    }
+  }
+  return def;
+}
+
+function maskValue(value: string): string {
+  return value.length > 4 ? `•••${value.slice(-4)}` : "•••";
+}
+
+export async function handleMcpDef({ name }: { name: string }, { paseo }: PluginHandlerContext) {
+  const destinations = await buildDestinations(paseo);
+  const def = findDef(destinations, name);
+  if (!def) return { found: false, kind: "http" as const, command: "", url: "", kvMasked: "" };
+  const kind = def.command ? ("stdio" as const) : ("http" as const);
+  const record = (kind === "stdio" ? def.env : def.headers) ?? {};
+  const kvMasked = Object.entries(record)
+    .map(([key, value]) => `${key}=${maskValue(value)}`)
+    .join("\n");
+  return {
+    found: true,
+    kind,
+    command: def.command ? [def.command, ...(def.args ?? [])].join(" ") : "",
+    url: def.url ?? "",
+    kvMasked,
+  };
+}
+
+export async function handleMcpEdit(
+  input: { name: string; kind: "stdio" | "http"; command?: string; url?: string; kvLines?: string; targets: string[] },
+  { paseo }: PluginHandlerContext,
+) {
+  const destinations = await buildDestinations(paseo);
+  const stored = findDef(destinations, input.name);
+  if (!stored) return { ok: false, message: `no existing definition of '${input.name}' to edit` };
+  const storedRecord = (input.kind === "stdio" ? stored.env : stored.headers) ?? {};
+  const parsed = parseKvLines(input.kvLines);
+  const record: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    // A still-masked value means "keep the stored secret for this key".
+    record[key] = value.startsWith("•••") ? (storedRecord[key] ?? "") : value;
+    if (record[key] === "") delete record[key];
+  }
+  const def: McpDef = {};
+  if (input.kind === "stdio") {
+    const parts = (input.command ?? "").trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return { ok: false, message: "stdio server needs a command" };
+    def.command = parts[0];
+    if (parts.length > 1) def.args = parts.slice(1);
+    if (Object.keys(record).length > 0) def.env = record;
+  } else {
+    if (!input.url?.trim()) return { ok: false, message: "http server needs a URL" };
+    def.url = input.url.trim();
+    if (Object.keys(record).length > 0) def.headers = record;
+  }
+  const { written, skipped } = applyDefToTargets(destinations, input.targets, input.name, def);
+  return {
+    ok: written.length > 0,
+    message: [
+      written.length ? `updated '${input.name}' in: ${written.join(", ")} (backups saved)` : "nothing written",
+      ...skipped,
+    ].join("\n"),
+  };
+}
+
+function binaryOnPath(command: string): boolean {
+  if (command.includes("/")) return existsSync(command);
+  const paths = (process.env.PATH ?? "").split(":").concat([join(HOME, ".local", "bin")]);
+  return paths.some((dir) => dir && existsSync(join(dir, command)));
+}
+
+async function probeHttp(url: string, headers: Record<string, string> | undefined) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(url, { method: "GET", headers, signal: controller.signal, redirect: "manual" });
+    const code = response.status;
+    if (code === 401 || code === 403) return { status: "auth-required" as const, note: `HTTP ${code} — authentication needed` };
+    if (code >= 200 && code < 400) return { status: "ok" as const, note: `HTTP ${code}` };
+    if (code === 404 || code === 405 || code === 406) return { status: "ok" as const, note: `reachable (HTTP ${code})` };
+    return { status: "warn" as const, note: `HTTP ${code}` };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { status: "down" as const, note: reason.includes("abort") ? "timeout after 5s" : reason.slice(0, 80) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function handleMcpHealth(_input: Record<string, never>, { paseo }: PluginHandlerContext) {
+  const destinations = await buildDestinations(paseo);
+  const names = [...new Set(destinations.flatMap((dest) => destNames(dest)))].sort();
+  const results = await Promise.all(
+    names.map(async (name) => {
+      const def = findDef(destinations, name);
+      if (!def) return { name, status: "unknown" as const, note: "no readable definition" };
+      if (def.command) {
+        return binaryOnPath(def.command)
+          ? { name, status: "ok" as const, note: `binary '${def.command}' found` }
+          : { name, status: "binary-missing" as const, note: `'${def.command}' not on PATH` };
+      }
+      if (def.url) {
+        const probe = await probeHttp(def.url, def.headers);
+        return { name, ...probe };
+      }
+      return { name, status: "unknown" as const, note: "no command or url" };
+    }),
+  );
+  return { results };
+}
+
 export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
   return await new Promise((resolve) => {
     const env = { ...process.env, PATH: `${process.env.PATH ?? ""}:${join(HOME, ".local", "bin")}` };
