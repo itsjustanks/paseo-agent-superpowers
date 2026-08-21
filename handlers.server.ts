@@ -380,7 +380,12 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     ...slot,
     wiredProviderId: providerIdForDir(overrides, slot.provider, slot.dir),
   }));
-  return { slots, agentAuthInstalled: agentAuthInstalled(), needsRestart };
+  return {
+    slots,
+    primaryAccounts: { claude: claudeAccountEmail(HOME), codex: codexAccountEmail(join(HOME, ".codex")) },
+    agentAuthInstalled: agentAuthInstalled(),
+    needsRestart,
+  };
 }
 
 export async function handleWireProvider(
@@ -553,15 +558,18 @@ export async function handleMcpAdd(
   };
 }
 
-export async function handleMcpApply({ name, targets }: { name: string; targets: string[] }, { paseo }: PluginHandlerContext) {
+export async function handleMcpApply(
+  { name, targets, sourceDestId }: { name: string; targets: string[]; sourceDestId?: string },
+  { paseo }: PluginHandlerContext,
+) {
   const destinations = await buildDestinations(paseo);
   let def: McpDef | null = null;
-  for (const dest of destinations) {
-    const candidate = dest.format === "json-mcp" ? jsonMcpRead(dest.configPath)[name] : tomlMcpReadOne(dest.configPath, name);
-    if (candidate) {
-      def = candidate;
-      if (dest.format === "json-mcp") break;
-    }
+  if (sourceDestId) {
+    const source = destinations.find((candidate) => candidate.id === sourceDestId);
+    def = source ? destReadOne(source, name) : null;
+    if (!def) return { ok: false, message: `'${name}' not found in the selected source destination` };
+  } else {
+    def = findDef(destinations, name);
   }
   if (!def) return { ok: false, message: `no existing definition of '${name}' found anywhere` };
   const { written, skipped } = applyDefToTargets(destinations, targets, name, def);
@@ -619,36 +627,46 @@ function maskValue(value: string): string {
   return value.length > 4 ? `•••${value.slice(-4)}` : "•••";
 }
 
-export async function handleMcpDef({ name }: { name: string }, { paseo }: PluginHandlerContext) {
-  const destinations = await buildDestinations(paseo);
-  const def = findDef(destinations, name);
-  if (!def) return { found: false, kind: "http" as const, command: "", url: "", kvMasked: "" };
-  const kind = def.command ? ("stdio" as const) : ("http" as const);
-  const record = (kind === "stdio" ? def.env : def.headers) ?? {};
-  const kvMasked = Object.entries(record)
-    .map(([key, value]) => `${key}=${maskValue(value)}`)
-    .join("\n");
-  return {
-    found: true,
-    kind,
-    command: def.command ? [def.command, ...(def.args ?? [])].join(" ") : "",
-    url: def.url ?? "",
-    kvMasked,
-  };
+function destReadOne(dest: Destination, name: string): McpDef | null {
+  return dest.format === "json-mcp" ? (jsonMcpRead(dest.configPath)[name] ?? null) : tomlMcpReadOne(dest.configPath, name);
 }
 
-export async function handleMcpEdit(
-  input: { name: string; kind: "stdio" | "http"; command?: string; url?: string; kvLines?: string; targets: string[] },
+export async function handleMcpDefAll({ name, reveal }: { name: string; reveal: boolean }, { paseo }: PluginHandlerContext) {
+  const destinations = await buildDestinations(paseo);
+  const rows = destinations.map((dest) => {
+    const def = destReadOne(dest, name);
+    if (!def) return { destId: dest.id, found: false, kind: "http" as const, command: "", url: "", kvLines: "" };
+    const kind = def.command ? ("stdio" as const) : ("http" as const);
+    const record = (kind === "stdio" ? def.env : def.headers) ?? {};
+    const kvLines = Object.entries(record)
+      .map(([key, value]) => `${key}=${reveal ? value : maskValue(value)}`)
+      .join("\n");
+    return {
+      destId: dest.id,
+      found: true,
+      kind,
+      command: def.command ? [def.command, ...(def.args ?? [])].join(" ") : "",
+      url: def.url ?? "",
+      kvLines,
+    };
+  });
+  return { rows };
+}
+
+export async function handleMcpEditOne(
+  input: { name: string; destId: string; kind: "stdio" | "http"; command?: string; url?: string; kvLines?: string },
   { paseo }: PluginHandlerContext,
 ) {
   const destinations = await buildDestinations(paseo);
-  const stored = findDef(destinations, input.name);
-  if (!stored) return { ok: false, message: `no existing definition of '${input.name}' to edit` };
-  const storedRecord = (input.kind === "stdio" ? stored.env : stored.headers) ?? {};
+  const dest = destinations.find((candidate) => candidate.id === input.destId);
+  if (!dest) return { ok: false, message: `unknown destination ${input.destId}` };
+  // Masked values restore from THIS destination's stored secret — per-account
+  // auth settings are the point.
+  const stored = destReadOne(dest, input.name);
+  const storedRecord = (input.kind === "stdio" ? stored?.env : stored?.headers) ?? {};
   const parsed = parseKvLines(input.kvLines);
   const record: Record<string, string> = {};
   for (const [key, value] of Object.entries(parsed)) {
-    // A still-masked value means "keep the stored secret for this key".
     record[key] = value.startsWith("•••") ? (storedRecord[key] ?? "") : value;
     if (record[key] === "") delete record[key];
   }
@@ -664,14 +682,12 @@ export async function handleMcpEdit(
     def.url = input.url.trim();
     if (Object.keys(record).length > 0) def.headers = record;
   }
-  const { written, skipped } = applyDefToTargets(destinations, input.targets, input.name, def);
-  return {
-    ok: written.length > 0,
-    message: [
-      written.length ? `updated '${input.name}' in: ${written.join(", ")} (backups saved)` : "nothing written",
-      ...skipped,
-    ].join("\n"),
-  };
+  try {
+    destWrite(dest, input.name, def);
+    return { ok: true, message: `updated '${input.name}' in ${dest.label} (backup saved)` };
+  } catch (error) {
+    return { ok: false, message: `${dest.label}: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 function binaryOnPath(command: string): boolean {

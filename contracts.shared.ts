@@ -18,6 +18,7 @@ export const scan = defineRpc({
   input: z.object({}),
   output: z.object({
     slots: z.array(SlotSchema),
+    primaryAccounts: z.object({ claude: z.string(), codex: z.string() }),
     agentAuthInstalled: z.boolean(),
     needsRestart: z.boolean(),
   }),
@@ -99,7 +100,11 @@ export const mcpAdd = defineRpc({
 
 export const mcpApply = defineRpc({
   name: "superpowers.mcp-apply",
-  input: z.object({ name: z.string(), targets: z.array(z.string()).min(1) }),
+  input: z.object({
+    name: z.string(),
+    targets: z.array(z.string()).min(1),
+    sourceDestId: z.string().optional(), // copy THIS destination's version; default = best available
+  }),
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
@@ -115,29 +120,34 @@ export const mcpSync = defineRpc({
   output: z.object({ ok: z.boolean(), log: z.string() }),
 });
 
-// Editable view of one server. Secret values are MASKED (•••last4); an edit
-// that keeps a masked value keeps the stored secret.
-export const mcpDef = defineRpc({
-  name: "superpowers.mcp-def",
-  input: z.object({ name: z.string() }),
-  output: z.object({
-    found: z.boolean(),
-    kind: z.enum(["stdio", "http"]),
-    command: z.string(),
-    url: z.string(),
-    kvMasked: z.string(), // one KEY=•••xxxx per line (env for stdio, headers for http)
-  }),
+// Per-destination editable view of one server. Secrets are MASKED (•••last4)
+// unless reveal=true — it is the user's own machine and their own secrets.
+// An edit that keeps a masked value keeps that destination's stored secret.
+export const McpDefRowSchema = z.object({
+  destId: z.string(),
+  found: z.boolean(),
+  kind: z.enum(["stdio", "http"]),
+  command: z.string(),
+  url: z.string(),
+  kvLines: z.string(), // KEY=value per line (env for stdio, headers for http)
+});
+export type McpDefRow = z.infer<typeof McpDefRowSchema>;
+
+export const mcpDefAll = defineRpc({
+  name: "superpowers.mcp-def-all",
+  input: z.object({ name: z.string(), reveal: z.boolean() }),
+  output: z.object({ rows: z.array(McpDefRowSchema) }),
 });
 
-export const mcpEdit = defineRpc({
-  name: "superpowers.mcp-edit",
+export const mcpEditOne = defineRpc({
+  name: "superpowers.mcp-edit-one",
   input: z.object({
     name: z.string(),
+    destId: z.string(),
     kind: z.enum(["stdio", "http"]),
     command: z.string().optional(),
     url: z.string().optional(),
-    kvLines: z.string().optional(), // masked values (•••…) keep the stored secret
-    targets: z.array(z.string()).min(1),
+    kvLines: z.string().optional(), // masked values (•••…) keep that destination's stored secret
   }),
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });

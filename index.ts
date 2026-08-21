@@ -4,8 +4,8 @@ import {
   diagnoseProvider,
   mcpAdd,
   mcpApply,
-  mcpDef,
-  mcpEdit,
+  mcpDefAll,
+  mcpEditOne,
   mcpHealth,
   mcpMatrix,
   mcpRemove,
@@ -18,8 +18,8 @@ import {
   handleDiagnoseProvider,
   handleMcpAdd,
   handleMcpApply,
-  handleMcpDef,
-  handleMcpEdit,
+  handleMcpDefAll,
+  handleMcpEditOne,
   handleMcpHealth,
   handleMcpMatrix,
   handleMcpRemove,
@@ -38,8 +38,8 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(mcpMatrix, handleMcpMatrix);
   plugin.handle(mcpAdd, handleMcpAdd);
   plugin.handle(mcpApply, handleMcpApply);
-  plugin.handle(mcpDef, handleMcpDef);
-  plugin.handle(mcpEdit, handleMcpEdit);
+  plugin.handle(mcpDefAll, handleMcpDefAll);
+  plugin.handle(mcpEditOne, handleMcpEditOne);
   plugin.handle(mcpHealth, handleMcpHealth);
   plugin.handle(mcpRemove, handleMcpRemove);
   plugin.handle(mcpSync, handleMcpSync);
