@@ -543,10 +543,19 @@ export async function handleWireProvider(
   return { providerId, needsRestart };
 }
 
+// Diagnostic payloads are provider-shaped and may echo env values back. Mask
+// anything token-like before it reaches the UI.
+function redactSecrets(text: string): string {
+  return text
+    .replace(/("(?:[^"]*(?:token|secret|key|password|auth|credential)[^"]*)"\s*:\s*")([^"]{4,})(")/gi, "$1•••$3")
+    .replace(/\b(sk-|pk-|ghp_|gho_|xox[abprs]-)[A-Za-z0-9_-]{8,}/g, "$1•••")
+    .replace(/\bBearer\s+[A-Za-z0-9._-]{8,}/gi, "Bearer •••");
+}
+
 export async function handleDiagnoseProvider({ providerId }: { providerId: string }, { paseo }: PluginHandlerContext) {
   try {
     const result = await paseo.providers.diagnostic(providerId as never);
-    return { summary: JSON.stringify(result, null, 2).slice(0, 2000) };
+    return { summary: redactSecrets(JSON.stringify(result, null, 2)).slice(0, 2000) };
   } catch (error) {
     return { summary: `diagnostic failed: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -569,9 +578,7 @@ export async function handleProviderHealth(_input: Record<string, never>, { pase
         const text = JSON.stringify(result);
         const ok = !/"error"|not logged|login required|unauthorized|failed/i.test(text);
         const models = /"models"\s*:\s*\[/.test(text) ? (text.match(/"id"\s*:/g)?.length ?? 0) : 0;
-        const summary = ok
-          ? `ok${models ? ` · ~${models} models` : ""}`
-          : text.slice(0, 160);
+        const summary = ok ? `ok${models ? ` · ~${models} models` : ""}` : redactSecrets(text).slice(0, 160);
         return { id, label: overrides[id]?.label ?? id, ok, summary };
       } catch (error) {
         return {
