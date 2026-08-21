@@ -1,5 +1,5 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { Destination, Slot } from "./contracts.shared";
@@ -36,10 +36,24 @@ function readJson(path: string): Record<string, unknown> | null {
   }
 }
 
+const BACKUP_KEEP = 5;
+
 function backupFile(path: string): void {
   if (!existsSync(path)) return;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   copyFileSync(path, `${path}.bak-superpowers-${stamp}`);
+  // Keep only the most recent few so config dirs do not fill with backups.
+  try {
+    const dir = dirname(path);
+    const prefix = `${basename(path)}.bak-superpowers-`;
+    const old = readdirSync(dir)
+      .filter((entry) => entry.startsWith(prefix))
+      .sort() // ISO timestamps sort chronologically
+      .slice(0, -BACKUP_KEEP);
+    for (const entry of old) rmSync(join(dir, entry), { force: true });
+  } catch {
+    // Pruning is best-effort; never block a write on it.
+  }
 }
 
 function writeJsonAtomic(path: string, value: unknown): void {
@@ -156,7 +170,13 @@ function jsonMcpRead(path: string): Record<string, McpDef> {
 }
 
 function jsonMcpWrite(path: string, name: string, def: McpDef | null): void {
-  const config = readJson(path) ?? {};
+  // A file that EXISTS but will not parse must never be overwritten: rewriting
+  // it from `{}` would drop everything else it holds (account identity, project
+  // history, settings). Missing is fine — that is a genuine first write.
+  const config = existsSync(path) ? readJson(path) : {};
+  if (config === null) {
+    throw new Error(`${path} exists but is not valid JSON — refusing to overwrite it`);
+  }
   const servers = (config.mcpServers as Record<string, McpDef> | undefined) ?? {};
   if (def === null) delete servers[name];
   else servers[name] = def;
@@ -233,11 +253,15 @@ function tomlMcpReadOne(path: string, name: string): McpDef | null {
 }
 
 function tomlMcpWrite(path: string, name: string, def: McpDef | null): void {
+  // Same rule as jsonMcpWrite: only a MISSING file may be created from scratch.
+  // An unreadable existing file is an error, never a reason to replace it.
   let text = "";
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    text = "";
+  if (existsSync(path)) {
+    try {
+      text = readFileSync(path, "utf8");
+    } catch (error) {
+      throw new Error(`${path} exists but could not be read (${error instanceof Error ? error.message : String(error)}) — refusing to overwrite it`);
+    }
   }
   backupFile(path);
   let block = tomlServerBlock(text, name);
@@ -296,7 +320,9 @@ async function buildDestinations(paseo: PluginHandlerContext["paseo"]): Promise<
 
   const enabled = (id: string) => overrides[id]?.enabled !== false;
 
-  if (enabled("claude")) {
+  // Claude's config sits directly in $HOME, so the generic parent-dir check in
+  // push() cannot tell "Claude Code is installed" from "this is a home dir".
+  if (enabled("claude") && (existsSync(join(HOME, ".claude.json")) || existsSync(join(HOME, ".claude")))) {
     const account = claudeAccountEmail(HOME);
     push({
       id: join(HOME, ".claude.json"),
@@ -791,7 +817,11 @@ export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
     const projects = (primary.projects as Record<string, Record<string, unknown>> | undefined) ?? {};
     for (const slot of slots.filter((entry) => entry.provider === "claude")) {
       const path = join(slot.dir, ".claude.json");
-      const config = readJson(path) ?? {};
+      const config = existsSync(path) ? readJson(path) : {};
+      if (config === null) {
+        logs.push(`claude · ${slot.email}: SKIPPED — ${path} exists but is not valid JSON`);
+        continue;
+      }
       config.mcpServers = mcp;
       for (const flag of SYNC_GLOBAL_FLAGS) {
         if (flag in primary) config[flag] = primary[flag];
