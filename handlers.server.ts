@@ -1,7 +1,8 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import type { Destination, Slot } from "./contracts.shared";
 
 const HOME = homedir();
@@ -84,8 +85,14 @@ function codexAccountEmail(codexHome: string): string {
   }
 }
 
-function credFile(provider: "claude" | "codex"): string {
-  return provider === "claude" ? ".credentials.json" : "auth.json";
+// Claude Code does NOT drop a credentials file inside CLAUDE_CONFIG_DIR on
+// macOS — the tokens go to the OS keychain, keyed per config dir. Verified:
+// three config dirs report three different `claude auth status` accounts at the
+// same time. So identity in .claude.json, not a credentials file, is what says
+// "this slot is logged in". Codex does keep auth.json inside CODEX_HOME.
+function slotLoggedIn(provider: "claude" | "codex", dir: string, accountEmail: string): boolean {
+  if (provider === "claude") return accountEmail !== "";
+  return existsSync(join(dir, "auth.json"));
 }
 
 function envVarFor(provider: "claude" | "codex"): string {
@@ -99,12 +106,8 @@ function collectSlots(): Array<Omit<Slot, "wiredProviderId">> {
     if (seen.has(dir)) return;
     seen.add(dir);
     const email = basename(dir);
-    const loggedIn = existsSync(join(dir, credFile(provider)));
-    const actualEmail = loggedIn
-      ? provider === "claude"
-        ? claudeAccountEmail(dir)
-        : codexAccountEmail(dir)
-      : "";
+    const actualEmail = provider === "claude" ? claudeAccountEmail(dir) : codexAccountEmail(dir);
+    const loggedIn = slotLoggedIn(provider, dir, actualEmail);
     slots.push({
       provider,
       email,
@@ -146,9 +149,29 @@ function slugForEmail(provider: string, email: string): string {
   return `${provider}-${email.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
 }
 
+// A GUI-launched daemon inherits a minimal PATH, not the user's login PATH, so
+// tools installed in /opt/homebrew/bin, ~/.local/bin etc. look "missing".
+// Resolve the login shell's PATH once per process.
+let cachedSearchPath: string[] | null = null;
+
+function searchPath(): string[] {
+  if (cachedSearchPath === null) {
+    let raw = process.env.PATH ?? "";
+    try {
+      const shell = process.env.SHELL || "/bin/sh";
+      const out = execFileSync(shell, ["-lc", 'printf %s "$PATH"'], { encoding: "utf8", timeout: 5000 });
+      if (out.trim()) raw = out.trim();
+    } catch {
+      // Fall back to the inherited PATH.
+    }
+    const extras = [join(HOME, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
+    cachedSearchPath = [...new Set(raw.split(delimiter).concat(extras).filter(Boolean))];
+  }
+  return cachedSearchPath;
+}
+
 function agentAuthInstalled(): boolean {
-  const paths = (process.env.PATH ?? "").split(":").concat([join(HOME, ".local", "bin")]);
-  return paths.some((p) => p && existsSync(join(p, "agent-auth")));
+  return searchPath().some((dir) => existsSync(join(dir, "agent-auth")));
 }
 
 // ---------------------------------------------------------------- MCP formats
@@ -160,6 +183,10 @@ type McpDef = {
   url?: string;
   headers?: Record<string, string>;
   type?: string;
+  // Verbatim TOML lines this mini-parser does not model (enabled,
+  // startup_timeout_sec, …). Carried through so a rename or a copy never
+  // silently drops settings it did not understand.
+  extra?: string[];
 };
 
 // json-mcp: a JSON file with a top-level `mcpServers` object. Claude Code's
@@ -190,18 +217,36 @@ function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
+// Table headers may be indented — valid TOML, and missing it once caused a
+// duplicate table to be appended (which makes the whole file unparseable).
 function tomlMcpNames(path: string): string[] {
   try {
     const text = readFileSync(path, "utf8");
-    return [...new Set([...text.matchAll(/^\[mcp_servers\.([^\].]+)/gm)].map((match) => match[1] ?? ""))];
+    return [...new Set([...text.matchAll(/^[ \t]*\[mcp_servers\.([^\].]+)/gm)].map((match) => match[1] ?? ""))];
   } catch {
     return [];
   }
 }
 
+// TOML basic ("…", escapes) and literal ('…', no escapes) strings.
+function tomlUnquote(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return JSON.parse(trimmed) as string;
+    } catch {
+      return null;
+    }
+  }
+  if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1);
+  }
+  return null;
+}
+
 function tomlServerBlock(text: string, name: string): { start: number; end: number } | null {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const header = new RegExp(`^\\[mcp_servers\\.${escaped}(?:\\.[^\\]]+)?\\]`, "m");
+  const header = new RegExp(`^[ \\t]*\\[mcp_servers\\.${escaped}(?:\\.[^\\]]+)?\\]`, "m");
   const startMatch = header.exec(text);
   if (!startMatch) return null;
   const start = startMatch.index;
@@ -228,52 +273,74 @@ function tomlMcpReadOne(path: string, name: string): McpDef | null {
   if (!block) return null;
   const body = text.slice(block.start, block.end);
   const def: McpDef = {};
-  const grab = (key: string) => new RegExp(`^${key}\\s*=\\s*"((?:[^"\\\\]|\\\\.)*)"`, "m").exec(body)?.[1];
-  const url = grab("url");
-  const command = grab("command");
-  if (url) def.url = JSON.parse(`"${url}"`);
-  if (command) def.command = JSON.parse(`"${command}"`);
-  const argsMatch = /^args\s*=\s*\[([^\]]*)\]/m.exec(body);
-  if (argsMatch) {
-    def.args = [...argsMatch[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) => JSON.parse(`"${match[1]}"`));
+  const bodyLines = body.split("\n");
+  // Top-level lines of the block: everything before the first subtable header.
+  const subStart = bodyLines.findIndex((line, index) => index > 0 && /^[ \t]*\[/.test(line));
+  const topLines = (subStart === -1 ? bodyLines : bodyLines.slice(0, subStart)).slice(1);
+  const extra: string[] = [];
+  for (const line of topLines) {
+    const pair = /^[ \t]*([A-Za-z0-9_.-]+)\s*=\s*(.+?)\s*$/.exec(line);
+    if (!pair) continue;
+    const [, key, rawValue] = pair;
+    if (key === "url" || key === "command") {
+      const value = tomlUnquote(rawValue);
+      if (value !== null) def[key] = value;
+      continue;
+    }
+    if (key === "args") {
+      const inner = /^\[(.*)\]$/.exec(rawValue.trim());
+      if (inner) {
+        def.args = [...inner[1].matchAll(/"(?:[^"\\]|\\.)*"|'[^']*'/g)]
+          .map((match) => tomlUnquote(match[0]))
+          .filter((value): value is string => value !== null);
+      }
+      continue;
+    }
+    // Anything else (enabled, startup_timeout_sec, …) survives verbatim.
+    extra.push(line.trim());
   }
+  if (extra.length > 0) def.extra = extra;
   for (const sub of ["env", "headers"] as const) {
-    const subHeader = body.indexOf(`[mcp_servers.${name}.${sub}]`);
-    if (subHeader === -1) continue;
-    const subBody = body.slice(subHeader).split("\n").slice(1);
+    const subHeader = new RegExp(`^[ \\t]*\\[mcp_servers\\.${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.${sub}\\]`, "m").exec(body);
+    if (!subHeader) continue;
+    const subBody = body.slice(subHeader.index).split("\n").slice(1);
     const record: Record<string, string> = {};
     for (const line of subBody) {
-      if (/^\s*\[/.test(line)) break;
-      const pair = /^\s*([A-Za-z0-9_-]+)\s*=\s*"((?:[^"\\]|\\.)*)"/.exec(line);
-      if (pair) record[pair[1]] = JSON.parse(`"${pair[2]}"`);
+      if (/^[ \t]*\[/.test(line)) break;
+      const pair = /^[ \t]*([A-Za-z0-9_.-]+)\s*=\s*(.+?)\s*$/.exec(line);
+      if (!pair) continue;
+      const value = tomlUnquote(pair[2]);
+      if (value !== null) record[pair[1]] = value;
     }
     if (Object.keys(record).length > 0) def[sub] = record;
   }
+  // A block we could not read meaningfully must not be treated as a definition:
+  // re-serializing an empty def would silently destroy the real one.
+  if (!def.command && !def.url) return null;
   return def;
 }
 
-function tomlMcpWrite(path: string, name: string, def: McpDef | null): void {
-  // Same rule as jsonMcpWrite: only a MISSING file may be created from scratch.
-  // An unreadable existing file is an error, never a reason to replace it.
-  let text = "";
-  if (existsSync(path)) {
-    try {
-      text = readFileSync(path, "utf8");
-    } catch (error) {
-      throw new Error(`${path} exists but could not be read (${error instanceof Error ? error.message : String(error)}) — refusing to overwrite it`);
-    }
+// A bare TOML table key. Anything else (dots, quotes, spaces, brackets) would
+// either nest the table under a different server or make the file unparseable.
+const TOML_SAFE_NAME = /^[A-Za-z0-9_-]+$/;
+
+// Pure text transform so callers can apply several servers in memory and write once.
+function tomlApply(text: string, name: string, def: McpDef | null): string {
+  if (!TOML_SAFE_NAME.test(name)) {
+    throw new Error(`'${name}' is not a valid TOML table name (letters, numbers, - and _ only)`);
   }
-  backupFile(path);
-  let block = tomlServerBlock(text, name);
+  let next = text;
+  let block = tomlServerBlock(next, name);
   while (block) {
-    text = text.slice(0, block.start) + text.slice(block.end);
-    block = tomlServerBlock(text, name);
+    next = next.slice(0, block.start) + next.slice(block.end);
+    block = tomlServerBlock(next, name);
   }
   if (def) {
     const lines = [`\n[mcp_servers.${name}]`];
     if (def.command) lines.push(`command = ${tomlString(def.command)}`);
     if (def.args?.length) lines.push(`args = [${def.args.map(tomlString).join(", ")}]`);
     if (def.url) lines.push(`url = ${tomlString(def.url)}`);
+    for (const line of def.extra ?? []) lines.push(line);
     for (const sub of ["env", "headers"] as const) {
       const record = def[sub];
       if (record && Object.keys(record).length > 0) {
@@ -281,9 +348,51 @@ function tomlMcpWrite(path: string, name: string, def: McpDef | null): void {
         for (const [key, value] of Object.entries(record)) lines.push(`${key} = ${tomlString(value)}`);
       }
     }
-    text = `${text.replace(/\n*$/, "\n")}${lines.join("\n")}\n`;
+    next = `${next.replace(/\n*$/, "\n")}${lines.join("\n")}\n`;
   }
-  writeFileSync(path, text);
+  return next;
+}
+
+// Only a MISSING file may be created from scratch. An unreadable existing file
+// is an error, never a reason to replace it.
+function tomlReadForWrite(path: string): string {
+  if (!existsSync(path)) return "";
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    throw new Error(`${path} exists but could not be read (${error instanceof Error ? error.message : String(error)}) — refusing to overwrite it`);
+  }
+}
+
+function tomlMcpWrite(path: string, name: string, def: McpDef | null): void {
+  const text = tomlReadForWrite(path);
+  const next = tomlApply(text, name, def); // throws before any write on a bad name
+  backupFile(path);
+  writeFileSync(path, next);
+}
+
+// The one-line summary shown in the always-visible list must never carry a
+// secret: tokens hide in command args (--header "Authorization: Bearer …",
+// --api-key …) and in URL query strings.
+const SECRETISH = /(token|secret|key|password|auth|bearer|credential)/i;
+
+function redactDetail(def: McpDef | null): string {
+  if (!def) return "";
+  if (def.url) return def.url.replace(/\?.*/, "?…");
+  if (!def.command) return "";
+  const parts: string[] = [def.command];
+  const args = def.args ?? [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (SECRETISH.test(arg)) {
+      // Redact the flag's value too, whether inline (--key=v) or the next arg.
+      parts.push(arg.includes("=") ? `${arg.split("=")[0]}=•••` : `${arg.split(/\s/)[0]} •••`);
+      if (!arg.includes("=") && !/\s/.test(arg)) index += 1;
+      continue;
+    }
+    parts.push(arg.replace(/\?.*/, "?…"));
+  }
+  return parts.join(" ");
 }
 
 function destRead(dest: Destination): Record<string, McpDef> {
@@ -501,9 +610,7 @@ export async function handleMcpMatrix(_input: Record<string, never>, { paseo }: 
     const hasInline = Boolean(
       (def?.env && Object.keys(def.env).length > 0) || (def?.headers && Object.keys(def.headers).length > 0),
     );
-    const rawDetail = def?.command ? [def.command, ...(def.args ?? [])].join(" ") : (def?.url ?? "");
-    // Strip query strings — URLs sometimes carry tokens.
-    const detail = rawDetail.replace(/\?.*/, "?…").slice(0, 80);
+    const detail = redactDetail(def).slice(0, 80);
     return {
       name,
       transport,
@@ -692,8 +799,19 @@ export async function handleMcpEditOne(
   const parsed = parseKvLines(input.kvLines);
   const record: Record<string, string> = {};
   for (const [key, value] of Object.entries(parsed)) {
-    record[key] = value.startsWith("•••") ? (storedRecord[key] ?? "") : value;
-    if (record[key] === "") delete record[key];
+    if (value.startsWith("•••")) {
+      // Renaming the key of a masked line would otherwise resolve to "" and
+      // silently drop the secret while reporting success.
+      if (!(key in storedRecord)) {
+        return {
+          ok: false,
+          message: `'${key}' has no stored value here — press Reveal secrets and paste the real value, or keep the original key name`,
+        };
+      }
+      record[key] = storedRecord[key];
+      continue;
+    }
+    if (value !== "") record[key] = value;
   }
   const def: McpDef = {};
   if (input.kind === "stdio") {
@@ -750,8 +868,7 @@ export async function handleMcpRename({ name, newName }: { name: string; newName
 
 function binaryOnPath(command: string): boolean {
   if (command.includes("/")) return existsSync(command);
-  const paths = (process.env.PATH ?? "").split(":").concat([join(HOME, ".local", "bin")]);
-  return paths.some((dir) => dir && existsSync(join(dir, command)));
+  return searchPath().some((dir) => existsSync(join(dir, command)));
 }
 
 async function probeHttp(url: string, headers: Record<string, string> | undefined) {
@@ -822,7 +939,10 @@ export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
         logs.push(`claude · ${slot.email}: SKIPPED — ${path} exists but is not valid JSON`);
         continue;
       }
-      config.mcpServers = mcp;
+      // Union, not replace: a server that exists only in this account (or an
+      // auth header edited per account) must survive a sync.
+      const slotServers = (config.mcpServers as Record<string, unknown> | undefined) ?? {};
+      config.mcpServers = { ...mcp, ...slotServers };
       for (const flag of SYNC_GLOBAL_FLAGS) {
         if (flag in primary) config[flag] = primary[flag];
       }
@@ -845,18 +965,36 @@ export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
   }
   const codexPrimary = join(HOME, ".codex", "config.toml");
   if (existsSync(codexPrimary)) {
-    let text = readFileSync(codexPrimary, "utf8");
+    // Copy only the MCP blocks the slot is missing, never the whole file — the
+    // slot's own model/approval settings and per-account servers stay put.
     const pin = 'cli_auth_credentials_store = "file"';
-    if (/^\s*cli_auth_credentials_store\s*=/m.test(text)) {
-      text = text.replace(/^\s*cli_auth_credentials_store\s*=.*$/m, pin);
-    } else {
-      text = `${text.replace(/\n*$/, "\n")}${pin}\n`;
+    const primaryDefs: Array<[string, McpDef]> = [];
+    for (const name of tomlMcpNames(codexPrimary)) {
+      const def = tomlMcpReadOne(codexPrimary, name);
+      if (def) primaryDefs.push([name, def]);
     }
     for (const slot of slots.filter((entry) => entry.provider === "codex")) {
       const path = join(slot.dir, "config.toml");
-      backupFile(path);
-      writeFileSync(path, text);
-      logs.push(`codex · ${slot.email}: config.toml synced from primary (file-store pinned)`);
+      try {
+        let text = tomlReadForWrite(path);
+        const existing = new Set(
+          [...text.matchAll(/^[ \t]*\[mcp_servers\.([^\].]+)/gm)].map((match) => match[1] ?? ""),
+        );
+        let added = 0;
+        for (const [name, def] of primaryDefs) {
+          if (existing.has(name)) continue; // never clobber a per-account definition
+          text = tomlApply(text, name, def);
+          added += 1;
+        }
+        text = /^\s*cli_auth_credentials_store\s*=/m.test(text)
+          ? text.replace(/^\s*cli_auth_credentials_store\s*=.*$/m, pin)
+          : `${text.replace(/\n*$/, "\n")}${pin}\n`;
+        backupFile(path);
+        writeFileSync(path, text);
+        logs.push(`codex · ${slot.email}: ${added} MCP server(s) added, ${existing.size} kept as-is, file-store pinned`);
+      } catch (error) {
+        logs.push(`codex · ${slot.email}: SKIPPED — ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
   if (logs.length === 0) return { ok: true, log: "no account slots to sync yet" };
