@@ -31,6 +31,12 @@ Requires Paseo ≥ 0.5 with plugins enabled (Settings → Plugins). **The [agent
 
 The browser OAuth login itself — it's an interactive flow. The panel shows the exact `agent-auth login …` command for any slot that needs it; everything else (status, wiring, diagnostics, MCP sync) is in the panel.
 
+## Troubleshooting
+
+- **Buttons stop responding after a plugin update/reload** — an already-open panel keeps the old client bundle with a dead session. Navigate to another sidebar item and back (or reopen the Paseo window). You're on the fresh bundle when the UI matches the latest features.
+- **A wired provider errors about a path that doesn't exist** — Paseo builds its provider registry at daemon startup; config changes (including re-wiring) only take effect after `paseo restart`. Restart when no agents are mid-task.
+- **A slot shows "login needed" although Paseo lists the provider** — listed means configured, not authenticated. Run the login command the panel shows for that slot.
+
 ## Security
 
 Plugin backend code runs trusted on your daemon machine. This plugin's handlers read only **account emails and key names** from slot configs to compute status — token material is never read into results, logged, or sent anywhere. Provider wiring goes through Paseo's own `config.patch` API. MCP sync copies definitions, never credentials.
