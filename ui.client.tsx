@@ -42,6 +42,13 @@ export function Dot({ color }: { color: string }) {
   return <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: color }} />;
 }
 
+// Traffic-light status colors — fixed semantics across themes.
+export const STATUS = {
+  green: "#22c55e",
+  orange: "#f59e0b",
+  red: "#ef4444",
+} as const;
+
 export function Badge({ label, theme, tone }: { label: string; theme: PluginTheme; tone?: "danger" | "accent" }) {
   const color =
     tone === "danger" ? theme.colors.statusDanger : tone === "accent" ? theme.colors.accent : theme.colors.foregroundMuted;

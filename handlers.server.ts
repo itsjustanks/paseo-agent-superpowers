@@ -690,6 +690,39 @@ export async function handleMcpEditOne(
   }
 }
 
+export async function handleMcpRename({ name, newName }: { name: string; newName: string }, { paseo }: PluginHandlerContext) {
+  if (!/^[A-Za-z0-9_-]+$/.test(newName)) {
+    return { ok: false, message: "new name must be letters, numbers, hyphens, underscores" };
+  }
+  if (newName === name) return { ok: false, message: "new name is the same" };
+  const destinations = await buildDestinations(paseo);
+  const renamed: string[] = [];
+  const skipped: string[] = [];
+  for (const dest of destinations) {
+    const def = destReadOne(dest, name);
+    if (!def) continue;
+    if (destReadOne(dest, newName)) {
+      skipped.push(`${dest.label}: '${newName}' already exists there`);
+      continue;
+    }
+    try {
+      destWrite(dest, newName, def); // write the copy first, then remove the old —
+      destWrite(dest, name, null); //   a failure in between leaves both, never neither
+      renamed.push(dest.label);
+    } catch (error) {
+      skipped.push(`${dest.label}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (renamed.length === 0) return { ok: false, message: ["nothing renamed", ...skipped].join("\n") };
+  return {
+    ok: true,
+    message: [
+      `renamed '${name}' → '${newName}' in: ${renamed.join(", ")} (backups saved). OAuth grants keyed to the old name may need re-authorizing in each CLI.`,
+      ...skipped,
+    ].join("\n"),
+  };
+}
+
 function binaryOnPath(command: string): boolean {
   if (command.includes("/")) return existsSync(command);
   const paths = (process.env.PATH ?? "").split(":").concat([join(HOME, ".local", "bin")]);

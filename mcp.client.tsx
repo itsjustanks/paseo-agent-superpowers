@@ -11,13 +11,14 @@ import {
   mcpHealth,
   mcpMatrix,
   mcpRemove,
+  mcpRename,
   mcpSync,
   type Destination,
   type McpDefRow,
   type McpHealth,
   type McpServerRow,
 } from "./contracts.shared";
-import { Badge, Btn, Dot, makeStyles } from "./ui.client";
+import { Badge, Btn, Dot, STATUS, makeStyles } from "./ui.client";
 
 function shortLabel(dest: Destination): string {
   const who = dest.account ? dest.account.split("@")[0] : dest.provider;
@@ -26,9 +27,10 @@ function shortLabel(dest: Destination): string {
 }
 
 function healthTone(theme: PluginTheme, status: McpHealth["status"]) {
-  if (status === "ok") return theme.colors.accent;
+  if (status === "ok") return STATUS.green;
+  if (status === "auth-required" || status === "warn") return STATUS.orange;
   if (status === "unknown") return theme.colors.foregroundMuted;
-  return theme.colors.statusDanger;
+  return STATUS.red;
 }
 
 function healthLabel(status: McpHealth["status"]) {
@@ -57,6 +59,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
   const callSync = useRpc(mcpSync);
   const callDefAll = useRpc(mcpDefAll);
   const callEditOne = useRpc(mcpEditOne);
+  const callRename = useRpc(mcpRename);
   const callHealth = useRpc(mcpHealth);
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
 
@@ -77,6 +80,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
   const [rowCommand, setRowCommand] = useState("");
   const [rowKv, setRowKv] = useState("");
   const [rowKind, setRowKind] = useState<"stdio" | "http">("http");
+  const [renameTo, setRenameTo] = useState("");
 
   // add form
   const [showAdd, setShowAdd] = useState(false);
@@ -156,6 +160,16 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
       if (result.ok && editServer) loadEditor(editServer, revealed);
     },
   });
+  const renameMutation = useMutation({
+    mutationFn: (serverName: string) => callRename({ name: serverName, newName: renameTo.trim() }),
+    onSuccess: (result) => {
+      onResult(result);
+      if (result.ok) {
+        closeEditor();
+        setRenameTo("");
+      }
+    },
+  });
   const applyMutation = useMutation({
     mutationFn: (input: { name: string; targets: string[]; sourceDestId?: string }) => callApply(input),
     onSuccess: (result) => {
@@ -200,16 +214,16 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
     borderTopColor: theme.colors.foregroundMuted + "1a",
   };
 
-  const renderEditor = (server: McpServerRow) => (
+  const renderEditor = (serverName: string) => (
     <View style={{ gap: 8 }}>
       <View style={styles.rowBetween}>
-        <Text style={styles.strong}>Edit '{server.name}' — per destination</Text>
+        <Text style={styles.strong}>Edit '{serverName}' — per destination</Text>
         <View style={styles.row}>
           <Btn
             label={revealed ? "Hide secrets" : "Reveal secrets"}
             kind="quiet"
             theme={theme}
-            onPress={() => loadEditor(server.name, !revealed)}
+            onPress={() => loadEditor(serverName, !revealed)}
           />
           <Btn label="Close editor" kind="quiet" theme={theme} onPress={closeEditor} />
         </View>
@@ -218,6 +232,26 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
         Each destination keeps its own definition — different auth per account is expected. Masked (•••) values keep that
         destination's stored secret on save.
       </Text>
+      <View style={styles.row}>
+        <TextInput
+          placeholder="rename to…"
+          placeholderTextColor={theme.colors.foregroundMuted}
+          value={renameTo}
+          onChangeText={setRenameTo}
+          autoCapitalize="none"
+          style={[inputStyle, { minWidth: 160 }]}
+        />
+        <Btn
+          label={renameMutation.isPending ? "Renaming…" : "Rename everywhere"}
+          kind="quiet"
+          theme={theme}
+          disabled={renameMutation.isPending || !renameTo.trim()}
+          onPress={() => renameMutation.mutate(serverName)}
+        />
+      </View>
+      {editRows.every((row) => !row.found) ? (
+        <Text style={styles.danger}>No destination has a readable definition for this server.</Text>
+      ) : null}
       {editRows
         .filter((row) => row.found)
         .map((row) => {
@@ -238,7 +272,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                   theme={theme}
                   onPress={() =>
                     applyMutation.mutate({
-                      name: server.name,
+                      name: serverName,
                       targets: destinations.filter((d) => d.id !== row.destId).map((d) => d.id),
                       sourceDestId: row.destId,
                     })
@@ -294,7 +328,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                   label={`+ ${shortLabel(dest)}`}
                   kind="quiet"
                   theme={theme}
-                  onPress={() => applyMutation.mutate({ name: server.name, targets: [row.destId] })}
+                  onPress={() => applyMutation.mutate({ name: serverName, targets: [row.destId] })}
                 />
               ) : null;
             })}
@@ -329,6 +363,9 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
           {filtered.length}/{servers.length} servers · {destinations.length} destinations
         </Text>
       </View>
+      <Text style={styles.muted}>status: 🟢 healthy · 🟠 auth needed / warning · 🔴 down · ⚪ not checked yet — run Health check</Text>
+
+      {editServer ? <View style={styles.card}>{renderEditor(editServer)}</View> : null}
 
       {showAdd ? (
         <View style={styles.card}>
@@ -405,10 +442,9 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
         const isOpen = expanded === server.name;
         return (
           <View key={server.name} style={styles.card}>
-            <Pressable accessibilityRole="button" accessibilityLabel={`${server.name} details`} onPress={() => setExpanded(isOpen ? null : server.name)}>
-              <View style={styles.rowBetween}>
+            <View style={styles.rowBetween}>
                 <View style={styles.row}>
-                  <Dot color={serverHealth ? healthTone(theme, serverHealth.status) : server.presentIn.length === destinations.length ? theme.colors.accent : theme.colors.foregroundMuted} />
+                  <Dot color={serverHealth ? healthTone(theme, serverHealth.status) : theme.colors.foregroundMuted} />
                   <Text style={styles.strong}>{server.name}</Text>
                   <Badge label={server.transport} theme={theme} />
                   <Badge label={server.authStyle === "inline-credentials" ? "creds inline" : "OAuth / none"} theme={theme} />
@@ -418,6 +454,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                   </Text>
                 </View>
                 <View style={styles.row}>
+                  <Btn label={isOpen ? "Hide" : "Details"} kind="quiet" theme={theme} onPress={() => setExpanded(isOpen ? null : server.name)} />
                   <Btn label="Edit" theme={theme} onPress={() => loadEditor(server.name, false)} />
                   {server.presentIn.length < destinations.length ? (
                     <Btn
@@ -434,14 +471,16 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                   ) : null}
                 </View>
               </View>
-            </Pressable>
             {serverHealth && serverHealth.status !== "ok" ? <Text style={styles.danger}>{serverHealth.note}</Text> : null}
+            {serverHealth?.status === "auth-required" ? (
+              <Text style={styles.muted}>
+                Authenticate per provider (OAuth is per account): Claude Code — run /mcp inside a session on that account;
+                other CLIs — their own MCP login flow.
+              </Text>
+            ) : null}
             {server.detail ? <Text style={styles.monoText}>{server.detail}</Text> : null}
 
             {isOpen ? (
-              editServer === server.name ? (
-                renderEditor(server)
-              ) : (
                 <View>
                   {destinations.map((dest) => {
                     const present = server.presentIn.includes(dest.id);
@@ -466,7 +505,6 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                     );
                   })}
                 </View>
-              )
             ) : null}
           </View>
         );

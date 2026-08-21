@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { diagnoseProvider, providerHealth, scan, wireProvider, type Slot } from "./contracts.shared";
-import { Badge, Btn, Dot, makeStyles } from "./ui.client";
+import { Badge, Btn, Dot, STATUS, makeStyles } from "./ui.client";
 
 export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const queryClient = useQueryClient();
@@ -37,8 +37,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     borderTopColor: theme.colors.foregroundMuted + "1a",
   };
 
-  const slotDot = (slot: Slot) =>
-    slot.wrongAccount ? theme.colors.statusDanger : slot.loggedIn ? theme.colors.accent : theme.colors.foregroundMuted;
+  const slotDot = (slot: Slot) => (slot.wrongAccount ? STATUS.red : slot.loggedIn ? STATUS.green : STATUS.orange);
 
   const diagnoseBtn = (providerId: string, key: string) => (
     <Btn
@@ -63,7 +62,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       <View key={provider} style={styles.card}>
         <View style={styles.rowBetween}>
           <View style={styles.row}>
-            <Dot color={health ? (health.ok ? theme.colors.accent : theme.colors.statusDanger) : theme.colors.foregroundMuted} />
+            <Dot color={health ? (health.ok ? STATUS.green : STATUS.red) : theme.colors.foregroundMuted} />
             <Text style={styles.strong}>{title}</Text>
             {health ? <Text style={health.ok ? styles.muted : styles.danger}>{health.summary}</Text> : <Text style={styles.muted}>checking…</Text>}
           </View>
@@ -99,7 +98,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     const account = provider === "claude" ? primaries?.claude : primaries?.codex;
     return (
       <View style={tableRow}>
-        <Dot color={account ? theme.colors.accent : theme.colors.foregroundMuted} />
+        <Dot color={account ? STATUS.green : STATUS.orange} />
         <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
           {account || "not logged in"}
         </Text>
@@ -119,6 +118,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
         Every provider connector with its health, and every account under it. Wire an account into Paseo and it becomes a
         parallel provider on its own rate limit.
       </Text>
+      <Text style={styles.muted}>status: 🟢 logged in / healthy · 🟠 login needed · 🔴 wrong account / failing</Text>
 
       {scanQuery.data?.needsRestart ? (
         <View style={styles.banner}>
@@ -151,7 +151,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
 
       {slots.some((slot) => !slot.loggedIn || slot.wrongAccount) ? (
         <Text style={styles.monoText}>
-          fix logins in a terminal: agent-auth login &lt;provider&gt; &lt;email&gt; — or `claude-auth all` / `codex-auth all`
+          {"fix logins in a terminal: agent-auth login all   (or: agent-auth login <provider> <email>)"}
         </Text>
       ) : null}
       {scanQuery.data && !scanQuery.data.agentAuthInstalled ? (

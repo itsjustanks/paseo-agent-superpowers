@@ -152,6 +152,12 @@ export const mcpEditOne = defineRpc({
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
+export const mcpRename = defineRpc({
+  name: "superpowers.mcp-rename",
+  input: z.object({ name: z.string(), newName: z.string().min(1) }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
 export const McpHealthSchema = z.object({
   name: z.string(),
   status: z.enum(["ok", "auth-required", "warn", "down", "binary-missing", "unknown"]),
