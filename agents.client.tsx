@@ -28,6 +28,22 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const primaries = scanQuery.data?.primaryAccounts;
   const healthById = new Map((healthQuery.data?.providers ?? []).map((provider) => [provider.id, provider]));
 
+  // A rate limit belongs to an ACCOUNT, so two entries signed into the same
+  // account are one pool wearing two hats — the failure mode where you think
+  // you have a spare pool and don't.
+  const accountUses = new Map<string, number>();
+  const countAccount = (provider: string, email: string) => {
+    if (!email) return;
+    const key = `${provider}:${email}`;
+    accountUses.set(key, (accountUses.get(key) ?? 0) + 1);
+  };
+  countAccount("claude", primaries?.claude ?? "");
+  countAccount("codex", primaries?.codex ?? "");
+  for (const slot of slots) countAccount(slot.provider, slot.actualEmail || slot.email);
+  const isShared = (provider: string, email: string) => (accountUses.get(`${provider}:${email}`) ?? 0) > 1;
+  const distinctPools = [...accountUses.keys()].length;
+  const totalEntries = [...accountUses.values()].reduce((sum, count) => sum + count, 0);
+
   const tableRow = {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -83,6 +99,9 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       {slot.source === "external" ? <Badge label="external" theme={theme} /> : null}
       {slot.wrongAccount ? <Badge label={`wrong: ${slot.actualEmail}`} theme={theme} tone="danger" /> : null}
       {!slot.loggedIn ? <Badge label="login needed" theme={theme} tone="danger" /> : null}
+      {slot.loggedIn && isShared(slot.provider, slot.actualEmail || slot.email) ? (
+        <Badge label="⚠ same account as another entry — one shared quota" theme={theme} tone="danger" />
+      ) : null}
       {slot.wiredProviderId ? (
         <>
           <Badge label={slot.wiredProviderId} theme={theme} tone="accent" />
@@ -103,6 +122,9 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           {account || "not logged in"}
         </Text>
         <Badge label="primary" theme={theme} tone="accent" />
+        {account && isShared(provider, account) ? (
+          <Badge label="⚠ same account as a slot — one shared quota" theme={theme} tone="danger" />
+        ) : null}
         <Text style={styles.muted}>builtin `{provider}`</Text>
       </View>
     );
@@ -119,6 +141,17 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
         parallel provider on its own rate limit.
       </Text>
       <Text style={styles.muted}>status: 🟢 logged in / healthy · 🟠 login needed · 🔴 wrong account / failing</Text>
+      <View style={styles.card}>
+        <Text style={styles.strong}>
+          {totalEntries} logged-in {totalEntries === 1 ? "entry" : "entries"} → {distinctPools} independent quota{" "}
+          {distinctPools === 1 ? "pool" : "pools"}
+        </Text>
+        <Text style={styles.muted}>
+          A rate limit belongs to an account, so entries signed into the same account share one limit. Paseo does not fail
+          over on its own: an agent that hits a limit stops and keeps its workspace — an orchestrator (or you) re-dispatches
+          it to another pool. Paseo's own usage figure tracks the primary accounts only, not these pools.
+        </Text>
+      </View>
 
       {scanQuery.data?.needsRestart ? (
         <View style={styles.banner}>

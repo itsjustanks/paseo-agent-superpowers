@@ -10,6 +10,7 @@ One card per provider connector — **Claude Code, Codex, Kimi Code, Grok** — 
 
 - the **primary** account (the login your plain `claude` / `codex` uses), shown by email
 - every **account slot** with live state: 🟢 logged in · 🟠 login needed · 🔴 wrong account (the slot folder says one email, the login inside is another)
+- a **pool summary** — "5 logged-in entries → 4 independent quota pools" — and a ⚠ badge on any two entries signed into the *same* account, since a rate limit belongs to an account, not to a slot
 - **Wire into Paseo** — one click adds that account as a Paseo custom provider (`extends` the native integration, pointing `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at the slot). Each wired account is an independent quota pool: five agents across three Claude accounts genuinely run on three separate rate limits. A banner reminds you Paseo loads new providers at the next daemon restart.
 
 ## 🔌 MCP
@@ -48,6 +49,12 @@ Requires Paseo ≥ 0.5 with plugins enabled (Settings → Plugins). Tested again
 ### Scope: user-level, not project-level
 
 The MCP tab manages **user-level** (global) servers — each provider's own config, available in all your projects. A repo's own project-level servers (`.mcp.json` in the repository) belong to that repo and are never read or written.
+
+## About rate limits and failover
+
+Paseo has no automatic provider failover: an agent that hits a usage limit stops with an error and keeps its workspace — it does not move itself to another account. Multiple pools help in two ways: an orchestrator can re-dispatch the stalled work to a sibling pool without any account switching, and independent agents can run on separate limits from the start. This tab makes the pool count explicit so you know what you actually have.
+
+Paseo's built-in usage figure reads the primary accounts only (`~/.claude`, `~/.codex`); it does not see per-account slots. Per-pool usage percentages would require reading each account's access token, which this plugin deliberately does not do.
 
 ## What stays in the terminal
 
