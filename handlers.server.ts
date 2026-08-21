@@ -1,5 +1,4 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -769,18 +768,68 @@ export async function handleMcpHealth(_input: Record<string, never>, { paseo }: 
   return { results };
 }
 
+// Native sync — no agent-auth CLI required (the CLI is an optional companion).
+// Copies user-level MCP definitions + project trust from each provider's
+// primary config into its account slots. Never credentials.
+const SYNC_GLOBAL_FLAGS = ["hasCompletedOnboarding", "bypassPermissionsModeAccepted", "theme", "autoUpdates", "effortLevel"];
+const SYNC_PROJECT_FIELDS = [
+  "hasTrustDialogAccepted",
+  "hasCompletedProjectOnboarding",
+  "allowedTools",
+  "mcpServers",
+  "enabledMcpjsonServers",
+  "disabledMcpjsonServers",
+  "dontCrawlDirectory",
+];
+
 export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
-  return await new Promise((resolve) => {
-    const env = { ...process.env, PATH: `${process.env.PATH ?? ""}:${join(HOME, ".local", "bin")}` };
-    execFile("agent-auth", ["sync"], { env, timeout: 30_000 }, (error, stdout, stderr) => {
-      if (error) {
-        const hint = agentAuthInstalled()
-          ? String(stderr || error.message)
-          : "agent-auth is not installed — see https://github.com/itsjustanks/agent-auth";
-        resolve({ ok: false, log: hint });
-        return;
+  const logs: string[] = [];
+  const slots = collectSlots();
+  const primary = readJson(join(HOME, ".claude.json"));
+  if (primary) {
+    const mcp = (primary.mcpServers as Record<string, unknown> | undefined) ?? {};
+    const projects = (primary.projects as Record<string, Record<string, unknown>> | undefined) ?? {};
+    for (const slot of slots.filter((entry) => entry.provider === "claude")) {
+      const path = join(slot.dir, ".claude.json");
+      const config = readJson(path) ?? {};
+      config.mcpServers = mcp;
+      for (const flag of SYNC_GLOBAL_FLAGS) {
+        if (flag in primary) config[flag] = primary[flag];
       }
-      resolve({ ok: true, log: String(stdout).trim() });
-    });
-  });
+      const slotProjects = (config.projects as Record<string, Record<string, unknown>> | undefined) ?? {};
+      config.projects = slotProjects;
+      let trusted = 0;
+      for (const [projectPath, entry] of Object.entries(projects)) {
+        if (!entry?.hasTrustDialogAccepted) continue;
+        trusted += 1;
+        const target = slotProjects[projectPath] ?? {};
+        slotProjects[projectPath] = target;
+        for (const field of SYNC_PROJECT_FIELDS) {
+          if (field in entry) target[field] = entry[field];
+        }
+      }
+      backupFile(path);
+      writeJsonAtomic(path, config);
+      logs.push(`claude · ${slot.email}: ${Object.keys(mcp).length} MCP servers, ${trusted} trusted projects`);
+    }
+  }
+  const codexPrimary = join(HOME, ".codex", "config.toml");
+  if (existsSync(codexPrimary)) {
+    let text = readFileSync(codexPrimary, "utf8");
+    const pin = 'cli_auth_credentials_store = "file"';
+    if (/^\s*cli_auth_credentials_store\s*=/m.test(text)) {
+      text = text.replace(/^\s*cli_auth_credentials_store\s*=.*$/m, pin);
+    } else {
+      text = `${text.replace(/\n*$/, "\n")}${pin}\n`;
+    }
+    for (const slot of slots.filter((entry) => entry.provider === "codex")) {
+      const path = join(slot.dir, "config.toml");
+      backupFile(path);
+      writeFileSync(path, text);
+      logs.push(`codex · ${slot.email}: config.toml synced from primary (file-store pinned)`);
+    }
+  }
+  if (logs.length === 0) return { ok: true, log: "no account slots to sync yet" };
+  logs.push("==> user-level definitions & trust only — OAuth tokens never copied");
+  return { ok: true, log: logs.join("\n") };
 }

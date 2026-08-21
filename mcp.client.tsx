@@ -65,7 +65,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
 
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [gapsOnly, setGapsOnly] = useState(false);
+  const [filterTab, setFilterTab] = useState<"all" | "gaps" | "issues">("all");
   const [health, setHealth] = useState<Map<string, McpHealth> | null>(null);
   const [healthRunning, setHealthRunning] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<{ name: string; destId: string } | null>(null);
@@ -192,7 +192,11 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
 
   const filtered = servers.filter((server) => {
     if (search && !server.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (gapsOnly && server.presentIn.length >= destinations.length) return false;
+    if (filterTab === "gaps" && server.presentIn.length >= destinations.length) return false;
+    if (filterTab === "issues") {
+      const entry = health?.get(server.name);
+      if (!entry || entry.status === "ok" || entry.status === "unknown") return false;
+    }
     return true;
   });
 
@@ -337,33 +341,65 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
     </View>
   );
 
+  const tab = (id: "all" | "gaps" | "issues", label: string) => (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Filter: ${label}`}
+      onPress={() => setFilterTab(id)}
+      style={{
+        paddingVertical: 4,
+        paddingHorizontal: 12,
+        borderRadius: 999,
+        backgroundColor: filterTab === id ? theme.colors.accent : "transparent",
+        borderWidth: 1,
+        borderColor: filterTab === id ? theme.colors.accent : theme.colors.foregroundMuted + "44",
+      }}
+    >
+      <Text style={{ color: filterTab === id ? theme.colors.accentForeground : theme.colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} stickyHeaderIndices={[1]}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>MCP</Text>
         <View style={styles.row}>
           <Btn label={healthRunning ? "Checking…" : "Health check"} onPress={runHealth} theme={theme} kind="quiet" disabled={healthRunning} />
           <Btn label={showAdd ? "Close" : "Add server"} onPress={() => setShowAdd((v) => !v)} theme={theme} />
-          <Btn label={syncMutation.isPending ? "Syncing…" : "Sync slots"} onPress={() => syncMutation.mutate()} theme={theme} kind="quiet" disabled={syncMutation.isPending} />
+          <Btn label={syncMutation.isPending ? "Syncing…" : "Sync accounts"} onPress={() => syncMutation.mutate()} theme={theme} kind="quiet" disabled={syncMutation.isPending} />
           <Btn label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
         </View>
       </View>
 
-      <View style={styles.row}>
-        <TextInput
-          placeholder="Search servers…"
-          placeholderTextColor={theme.colors.foregroundMuted}
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          style={[inputStyle, { flex: 1, minWidth: 140 }]}
-        />
-        <Btn label={gapsOnly ? "Showing gaps" : "All servers"} kind="quiet" theme={theme} onPress={() => setGapsOnly((v) => !v)} />
+      <View style={{ backgroundColor: theme.colors.surface0, paddingVertical: 6, gap: 8 }}>
+        <View style={styles.row}>
+          <TextInput
+            placeholder="Search servers…"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            style={[inputStyle, { flex: 1, minWidth: 140 }]}
+          />
+          {tab("all", `All (${servers.length})`)}
+          {tab("gaps", "Gaps")}
+          {tab("issues", "Issues")}
+        </View>
         <Text style={styles.muted}>
-          {filtered.length}/{servers.length} servers · {destinations.length} destinations
+          🟢 healthy · 🟠 auth needed · 🔴 down · ⚪ unchecked — {filtered.length}/{servers.length} shown · {destinations.length} destinations
         </Text>
       </View>
-      <Text style={styles.muted}>status: 🟢 healthy · 🟠 auth needed / warning · 🔴 down · ⚪ not checked yet — run Health check</Text>
+
+      <Text style={styles.muted}>
+        These are USER-LEVEL servers (each provider's global config) — available in every project. Project-level servers
+        (a repo's own .mcp.json) belong to that repo and are not touched here.
+      </Text>
+
+      {filterTab === "issues" && !health ? (
+        <Text style={styles.muted}>Run Health check first — Issues shows servers that fail it.</Text>
+      ) : null}
 
       {editServer ? <View style={styles.card}>{renderEditor(editServer)}</View> : null}
 

@@ -150,12 +150,19 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       {providerCard("grok", "Grok", null)}
 
       {slots.some((slot) => !slot.loggedIn || slot.wrongAccount) ? (
-        <Text style={styles.monoText}>
-          {"fix logins in a terminal: agent-auth login all   (or: agent-auth login <provider> <email>)"}
-        </Text>
+        scanQuery.data?.agentAuthInstalled ? (
+          <Text style={styles.monoText}>{"fix logins in a terminal: agent-auth login all"}</Text>
+        ) : (
+          <Text style={styles.monoText}>
+            {'fix logins in a terminal (per account):\nCLAUDE_CONFIG_DIR="<slot folder>" claude auth login --email <email>\nCODEX_HOME="<slot folder>" codex login'}
+          </Text>
+        )
       ) : null}
       {scanQuery.data && !scanQuery.data.agentAuthInstalled ? (
-        <Text style={styles.danger}>agent-auth CLI not found — install it for logins: github.com/itsjustanks/agent-auth</Text>
+        <Text style={styles.muted}>
+          Optional: the agent-auth CLI (github.com/itsjustanks/agent-auth) turns logins into one command and adds
+          hot-switching — this panel works fine without it.
+        </Text>
       ) : null}
     </ScrollView>
   );

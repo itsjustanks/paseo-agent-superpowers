@@ -23,7 +23,9 @@ npm run typecheck
 paseo plugin install "$(pwd)"
 ```
 
-Requires Paseo ≥ 0.5 with plugins enabled (Settings → Plugins), and the [agent-auth](https://github.com/itsjustanks/agent-auth) CLI for logins and MCP sync. The panel also detects hand-rolled slot layouts in `~/.claude-accounts` / `~/.codex-accounts` (read-only, labeled "external").
+Requires Paseo ≥ 0.5 with plugins enabled (Settings → Plugins). **The [agent-auth](https://github.com/itsjustanks/agent-auth) CLI is optional** — the plugin is fully standalone (MCP sync, wiring, health, editing are all built in); agent-auth adds one-command logins and hot-switching of the plain `claude`/`codex` commands. The panel also detects hand-rolled slot layouts in `~/.claude-accounts` / `~/.codex-accounts` (read-only, labeled "external").
+
+**Scope**: the MCP tab manages **user-level** (global) servers — each provider's own config. Project-level servers (a repo's `.mcp.json`) belong to that repo and are never touched.
 
 ## What stays in the terminal
 
