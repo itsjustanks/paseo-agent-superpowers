@@ -114,7 +114,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
             ) : auto.launcherExists ? (
               <Btn label="Wire auto-router" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
             ) : (
-              <Text style={styles.muted}>run `agent-auth auto` to enable</Text>
+              <Text style={styles.muted}>run `agent-link auto` to enable</Text>
             )}
           </View>
         ) : null}
@@ -188,7 +188,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Agent Sync</Text>
+        <Text style={styles.title}>Agent Link</Text>
         <Btn label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
       </View>
       <Text style={styles.subtitle}>
@@ -242,7 +242,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
 
       {slots.some((slot) => !slot.loggedIn || slot.wrongAccount) ? (
         scanQuery.data?.agentAuthInstalled ? (
-          <Text style={styles.monoText}>{"fix logins in a terminal: agent-auth login all"}</Text>
+          <Text style={styles.monoText}>{"fix logins in a terminal: agent-link login all"}</Text>
         ) : (
           <Text style={styles.monoText}>
             {'fix logins in a terminal (per account):\nCLAUDE_CONFIG_DIR="<slot folder>" claude auth login --email <email>\nCODEX_HOME="<slot folder>" codex login'}
@@ -251,7 +251,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       ) : null}
       {scanQuery.data && !scanQuery.data.agentAuthInstalled ? (
         <Text style={styles.muted}>
-          Optional: the agent-auth CLI (github.com/itsjustanks/agent-auth) turns logins into one command and adds
+          Optional: the agent-link CLI (github.com/itsjustanks/agent-link) turns logins into one command and adds
           hot-switching — this panel works fine without it.
         </Text>
       ) : null}

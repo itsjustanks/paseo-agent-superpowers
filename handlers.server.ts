@@ -6,8 +6,13 @@ import { basename, delimiter, dirname, join } from "node:path";
 import type { Destination, Slot } from "./contracts.shared";
 
 const HOME = homedir();
-const AGENT_AUTH_ROOT = join(process.env.AGENT_AUTH_HOME ?? join(HOME, ".agent-auth"), "accounts");
-// Hand-rolled slot layouts some setups use outside agent-auth (read-only here).
+// Home dir: new name first, then the pre-0.3 name so existing installs work.
+const AGENT_LINK_HOME_DIR =
+  process.env.AGENT_LINK_HOME ??
+  process.env.AGENT_AUTH_HOME ??
+  (existsSync(join(HOME, ".agent-link")) ? join(HOME, ".agent-link") : join(HOME, ".agent-auth"));
+const AGENT_LINK_ROOT = join(AGENT_LINK_HOME_DIR, "accounts");
+// Hand-rolled slot layouts some setups use outside agent-link (read-only here).
 const EXTERNAL_ROOTS: Array<{ provider: "claude" | "codex"; root: string }> = [
   { provider: "claude", root: join(HOME, ".claude-accounts") },
   { provider: "codex", root: join(HOME, ".codex-accounts") },
@@ -102,7 +107,7 @@ function envVarFor(provider: "claude" | "codex"): string {
 function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil">> {
   const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil">> = [];
   const seen = new Set<string>();
-  const add = (provider: "claude" | "codex", dir: string, source: "agent-auth" | "external") => {
+  const add = (provider: "claude" | "codex", dir: string, source: "agent-link" | "external") => {
     if (seen.has(dir)) return;
     seen.add(dir);
     const email = basename(dir);
@@ -119,7 +124,7 @@ function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil">> 
     });
   };
   for (const provider of ["claude", "codex"] as const) {
-    for (const dir of listDirs(join(AGENT_AUTH_ROOT, provider))) add(provider, dir, "agent-auth");
+    for (const dir of listDirs(join(AGENT_LINK_ROOT, provider))) add(provider, dir, "agent-link");
   }
   for (const { provider, root } of EXTERNAL_ROOTS) {
     for (const dir of listDirs(root)) add(provider, dir, "external");
@@ -170,8 +175,8 @@ function searchPath(): string[] {
   return cachedSearchPath;
 }
 
-function agentAuthInstalled(): boolean {
-  return searchPath().some((dir) => existsSync(join(dir, "agent-auth")));
+function agentLinkInstalled(): boolean {
+  return searchPath().some((dir) => existsSync(join(dir, "agent-link")) || existsSync(join(dir, "agent-auth")));
 }
 
 // ---------------------------------------------------------------- MCP formats
@@ -508,10 +513,8 @@ async function buildDestinations(paseo: PluginHandlerContext["paseo"]): Promise<
 
 // ---------------------------------------------------------------- handlers
 
-const AGENT_AUTH_HOME_DIR = process.env.AGENT_AUTH_HOME ?? join(HOME, ".agent-auth");
-
 function poolsDir(): string {
-  return join(AGENT_AUTH_HOME_DIR, "state", "pools");
+  return join(AGENT_LINK_HOME_DIR, "state", "pools");
 }
 
 function cooldownUntil(provider: string, email: string): number {
@@ -525,7 +528,7 @@ function cooldownUntil(provider: string, email: string): number {
 }
 
 function autoLauncherPath(provider: "claude" | "codex"): string {
-  return join(AGENT_AUTH_HOME_DIR, "bin", `${provider}-auto`);
+  return join(AGENT_LINK_HOME_DIR, "bin", `${provider}-auto`);
 }
 
 // A provider is the auto-router for `provider` when its command points at that
@@ -556,7 +559,7 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     slots,
     primaryAccounts: { claude: claudeAccountEmail(HOME), codex: codexAccountEmail(join(HOME, ".codex")) },
     autoRouters,
-    agentAuthInstalled: agentAuthInstalled(),
+    agentAuthInstalled: agentLinkInstalled(),
     needsRestart,
   };
 }
@@ -566,7 +569,7 @@ export async function handleWireAuto({ provider }: { provider: "claude" | "codex
   if (!existsSync(launcher)) {
     return {
       ok: false,
-      message: `no launcher at ${launcher} — run 'agent-auth auto' in a terminal to create it`,
+      message: `no launcher at ${launcher} — run 'agent-link auto' in a terminal to create it`,
     };
   }
   const providerId = `${provider}-auto`;
@@ -575,7 +578,7 @@ export async function handleWireAuto({ provider }: { provider: "claude" | "codex
       providers: {
         [providerId]: {
           extends: provider,
-          label: `${provider === "claude" ? "Claude" : "Codex"} (Dynamic Agent Auth)`,
+          label: `${provider === "claude" ? "Claude" : "Codex"} (Dynamic Agent Link)`,
           description: `Routes each new agent to a live ${provider} account (least-recently-used, skips cooled-down)`,
           command: [launcher],
         },

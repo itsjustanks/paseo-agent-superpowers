@@ -52,13 +52,13 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addSurface("agent-sync", AgentSyncSurface);
   plugin.addSurface("mcp", McpSurface);
-  plugin.addSidebarItem({ id: "agent-sync", title: "Agent Sync", icon: "Users", surface: "agent-sync" });
+  plugin.addSidebarItem({ id: "agent-sync", title: "Agent Link", icon: "Users", surface: "agent-sync" });
   plugin.addSidebarItem({ id: "mcp", title: "MCP", icon: "Plug", surface: "mcp" });
   plugin.addCommandCenterItem({
     id: "open-agent-sync",
-    title: "Open Agent Sync (accounts & provider health)",
+    title: "Open Agent Link (accounts & provider health)",
     icon: "Users",
-    keywords: ["accounts", "providers", "auth", "health", "agent-auth"],
+    keywords: ["accounts", "providers", "auth", "health", "agent-link"],
     context: "global",
     onSelect({ openSurface }) {
       openSurface("agent-sync");

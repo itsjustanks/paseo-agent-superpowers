@@ -5,7 +5,7 @@ export const SlotSchema = z.object({
   provider: z.enum(["claude", "codex"]),
   email: z.string(),
   dir: z.string(),
-  source: z.enum(["agent-auth", "external"]),
+  source: z.enum(["agent-link", "external"]),
   loggedIn: z.boolean(),
   actualEmail: z.string(),
   wrongAccount: z.boolean(),
