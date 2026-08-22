@@ -2,8 +2,8 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
-import { diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
+import { ScrollView, Text, TextInput, View } from "react-native";
+import { addAccount, diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
 import { Badge, Btn, Dot, STATUS, makeStyles } from "./ui.client";
 
 export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
@@ -14,8 +14,11 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const callHealth = useRpc(providerHealth);
   const callWireAuto = useRpc(wireAuto);
   const callCooldown = useRpc(setCooldown);
+  const callAddAccount = useRpc(addAccount);
   const [diagnosis, setDiagnosis] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [addingFor, setAddingFor] = useState<"claude" | "codex" | null>(null);
+  const [newEmail, setNewEmail] = useState("");
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
 
   const scanQuery = useQuery({ queryKey: ["superpowers", "scan"], queryFn: () => callScan({}) });
@@ -30,6 +33,17 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     mutationFn: (provider: "claude" | "codex") => callWireAuto({ provider }),
     onSuccess: (result) => {
       setNotice(result.message);
+      refresh();
+    },
+  });
+  const addMutation = useMutation({
+    mutationFn: (input: { provider: "claude" | "codex"; email: string }) => callAddAccount(input),
+    onSuccess: (result) => {
+      setNotice(result.message);
+      if (result.ok) {
+        setAddingFor(null);
+        setNewEmail("");
+      }
       refresh();
     },
   });
@@ -119,6 +133,45 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           </View>
         ) : null}
         {rows}
+        {provider === "claude" || provider === "codex" ? (
+          addingFor === provider ? (
+            <View style={{ gap: 6, paddingTop: 6 }}>
+              <TextInput
+                placeholder={`new ${provider} account email`}
+                placeholderTextColor={theme.colors.foregroundMuted}
+                value={newEmail}
+                onChangeText={setNewEmail}
+                autoCapitalize="none"
+                style={{
+                  borderWidth: 1,
+                  borderColor: theme.colors.foregroundMuted + "44",
+                  borderRadius: 7,
+                  paddingVertical: 6,
+                  paddingHorizontal: 9,
+                  color: theme.colors.foreground,
+                  fontSize: 12,
+                }}
+              />
+              <View style={styles.row}>
+                <Btn
+                  label={addMutation.isPending ? "Starting…" : "Create & sign in"}
+                  theme={theme}
+                  disabled={addMutation.isPending || !newEmail.trim()}
+                  onPress={() => addMutation.mutate({ provider, email: newEmail.trim() })}
+                />
+                <Btn label="Cancel" kind="quiet" theme={theme} onPress={() => setAddingFor(null)} />
+              </View>
+              <Text style={styles.muted}>
+                Opens that CLI's own browser login. Sign in as exactly this account — the panel flags a mismatch.
+              </Text>
+            </View>
+          ) : (
+            <View style={tableRow}>
+              <Text style={[styles.muted, { flex: 1 }]}>Add another account to this provider</Text>
+              <Btn label="+ Add account" kind="quiet" theme={theme} onPress={() => { setAddingFor(provider); setNewEmail(""); }} />
+            </View>
+          )
+        ) : null}
       </View>
     );
   };

@@ -40,6 +40,12 @@ export const wireAuto = defineRpc({
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
+export const addAccount = defineRpc({
+  name: "superpowers.add-account",
+  input: z.object({ provider: z.enum(["claude", "codex"]), email: z.string().min(3) }),
+  output: z.object({ ok: z.boolean(), message: z.string(), started: z.boolean() }),
+});
+
 export const setCooldown = defineRpc({
   name: "superpowers.set-cooldown",
   input: z.object({ provider: z.enum(["claude", "codex"]), email: z.string(), minutes: z.number() }),

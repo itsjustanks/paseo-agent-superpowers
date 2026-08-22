@@ -1,5 +1,5 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
@@ -587,6 +587,63 @@ export async function handleWireAuto({ provider }: { provider: "claude" | "codex
   } as never);
   needsRestart = true;
   return { ok: true, message: `'${providerId}' wired — restart the Paseo daemon to load it` };
+}
+
+// Create the slot and kick off that CLI's own browser login. The flow opens a
+// browser and completes there, so it can be started detached — the panel then
+// shows the account as logged in once its config records the identity.
+export async function handleAddAccount({ provider, email }: { provider: "claude" | "codex"; email: string }) {
+  if (!/^[^\s/\\]+@[^\s/\\]+$/.test(email)) {
+    return { ok: false, started: false, message: "that does not look like an account email" };
+  }
+  const dir = join(AGENT_LINK_ROOT, provider, email);
+  try {
+    mkdirSync(dir, { recursive: true });
+    if (provider === "codex") {
+      // Codex slots must keep credentials inside CODEX_HOME.
+      const target = join(dir, "config.toml");
+      let text = existsSync(target)
+        ? readFileSync(target, "utf8")
+        : existsSync(join(HOME, ".codex", "config.toml"))
+          ? readFileSync(join(HOME, ".codex", "config.toml"), "utf8")
+          : "";
+      const pin = 'cli_auth_credentials_store = "file"';
+      text = /^\s*cli_auth_credentials_store\s*=/m.test(text)
+        ? text.replace(/^\s*cli_auth_credentials_store\s*=.*$/m, pin)
+        : `${pin}\n${text}`;
+      writeFileSync(target, text);
+    }
+  } catch (error) {
+    return { ok: false, started: false, message: error instanceof Error ? error.message : String(error) };
+  }
+
+  const bin = searchPath()
+    .map((entry) => join(entry, provider))
+    .find((candidate) => existsSync(candidate));
+  if (!bin) {
+    return {
+      ok: true,
+      started: false,
+      message: `slot created. The ${provider} CLI is not on the daemon's PATH, so finish in a terminal: agent-link login ${provider} ${email}`,
+    };
+  }
+  try {
+    const env = { ...process.env, [envVarFor(provider)]: dir };
+    const args = provider === "claude" ? ["auth", "login", "--email", email] : ["login"];
+    const child = spawn(bin, args, { env, detached: true, stdio: "ignore" });
+    child.unref();
+    return {
+      ok: true,
+      started: true,
+      message: `sign in as ${email} in the browser window that opens, then press Refresh. If nothing opens, run: agent-link login ${provider} ${email}`,
+    };
+  } catch (error) {
+    return {
+      ok: true,
+      started: false,
+      message: `slot created, but the login could not be started (${error instanceof Error ? error.message : String(error)}). Run: agent-link login ${provider} ${email}`,
+    };
+  }
 }
 
 export async function handleSetCooldown({

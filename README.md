@@ -11,6 +11,7 @@ One card per provider connector — **Claude Code, Codex, Kimi Code, Grok** — 
 - the **primary** account (the login your plain `claude` / `codex` uses), shown by email
 - every **account slot** with live state: 🟢 logged in · 🟠 login needed · 🔴 wrong account (the slot folder says one email, the login inside is another)
 - a **pool summary** — "5 logged-in entries → 4 independent quota pools" — and a ⚠ badge on any two entries signed into the *same* account, since a rate limit belongs to an account, not to a slot
+- **+ Add account** — add another account to any provider straight from the panel: it creates the slot and launches that CLI's own browser login, then the row turns green once you have signed in (it flags a mismatch if you sign in as someone else)
 - **Auto-router** — one click wires a single `Claude (Dynamic Agent Link)` / `Codex (Dynamic Agent Link)` provider that sends each new agent to the least-recently-used live account. Pick that one provider and your accounts get used automatically; a running agent is never re-routed.
 - **Park 3h / Resume** — take an account that hit its limit out of rotation and put it back
 - **Wire into Paseo** — one click adds that account as a Paseo custom provider (`extends` the native integration, pointing `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at the slot). Each wired account is an independent quota pool: five agents across three Claude accounts genuinely run on three separate rate limits. A banner reminds you Paseo loads new providers at the next daemon restart.
@@ -56,6 +57,7 @@ The MCP tab manages **user-level** (global) servers — each provider's own conf
 
 Paseo has no automatic provider failover: an agent that hits a usage limit stops with an error and keeps its workspace — it does not move itself to another account. Three things reduce the pain, and the tab exposes all of them:
 
+- **+ Add account** — add another account to any provider straight from the panel: it creates the slot and launches that CLI's own browser login, then the row turns green once you have signed in (it flags a mismatch if you sign in as someone else)
 - **Auto-router** — one provider that picks a live account per launch, so agents spread across accounts without you choosing
 - **Park / Resume** — take an exhausted account out of rotation; new agents skip it until it recovers
 - **Pool count** — see how many *independent* limits you actually have, with duplicates flagged
@@ -66,7 +68,7 @@ Paseo's built-in usage figure reads the primary accounts only (`~/.claude`, `~/.
 
 ## What stays in the terminal
 
-Browser OAuth — both account logins and per-server MCP authorization. Those flows are owned by each CLI and are **provider-specific and per-account**: Claude Code authorizes an MCP server with `/mcp` inside a session on that account; other CLIs have their own flow. No panel can do them for you. What this panel does is show exactly which account or server needs authorizing, and hand you the command.
+Per-server MCP authorization, and finishing an account sign-in in the browser. The panel can *start* an account login for you (**+ Add account**), but the sign-in itself happens in the browser, and MCP OAuth Those flows are owned by each CLI and are **provider-specific and per-account**: Claude Code authorizes an MCP server with `/mcp` inside a session on that account; other CLIs have their own flow. No panel can do them for you. What this panel does is show exactly which account or server needs authorizing, and hand you the command.
 
 ## Troubleshooting
 
