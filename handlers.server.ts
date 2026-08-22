@@ -575,7 +575,7 @@ export async function handleWireAuto({ provider }: { provider: "claude" | "codex
       providers: {
         [providerId]: {
           extends: provider,
-          label: `${provider === "claude" ? "Claude" : "Codex"} (Agent Auth)`,
+          label: `${provider === "claude" ? "Claude" : "Codex"} (Dynamic Agent Auth)`,
           description: `Routes each new agent to a live ${provider} account (least-recently-used, skips cooled-down)`,
           command: [launcher],
         },

@@ -11,7 +11,7 @@ One card per provider connector — **Claude Code, Codex, Kimi Code, Grok** — 
 - the **primary** account (the login your plain `claude` / `codex` uses), shown by email
 - every **account slot** with live state: 🟢 logged in · 🟠 login needed · 🔴 wrong account (the slot folder says one email, the login inside is another)
 - a **pool summary** — "5 logged-in entries → 4 independent quota pools" — and a ⚠ badge on any two entries signed into the *same* account, since a rate limit belongs to an account, not to a slot
-- **Auto-router** — one click wires a single `Claude (Agent Auth)` / `Codex (Agent Auth)` provider that sends each new agent to the least-recently-used live account. Pick that one provider and your accounts get used automatically; a running agent is never re-routed.
+- **Auto-router** — one click wires a single `Claude (Dynamic Agent Auth)` / `Codex (Dynamic Agent Auth)` provider that sends each new agent to the least-recently-used live account. Pick that one provider and your accounts get used automatically; a running agent is never re-routed.
 - **Park 3h / Resume** — take an account that hit its limit out of rotation and put it back
 - **Wire into Paseo** — one click adds that account as a Paseo custom provider (`extends` the native integration, pointing `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at the slot). Each wired account is an independent quota pool: five agents across three Claude accounts genuinely run on three separate rate limits. A banner reminds you Paseo loads new providers at the next daemon restart.
 
