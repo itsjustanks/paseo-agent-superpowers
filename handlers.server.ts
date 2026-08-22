@@ -6,11 +6,30 @@ import { basename, delimiter, dirname, join } from "node:path";
 import type { Destination, Slot } from "./contracts.shared";
 
 const HOME = homedir();
-// Home dir: new name first, then the pre-0.3 name so existing installs work.
-const AGENT_LINK_HOME_DIR =
-  process.env.AGENT_LINK_HOME ??
-  process.env.AGENT_AUTH_HOME ??
-  (existsSync(join(HOME, ".agent-link")) ? join(HOME, ".agent-link") : join(HOME, ".agent-auth"));
+// Home dir: prefer whichever location actually holds accounts. Picking a
+// merely-existing empty dir made the panel look at the wrong place and report
+// working accounts as missing and the auto-router as unwired.
+function hasAccounts(root: string): boolean {
+  for (const provider of ["claude", "codex"]) {
+    try {
+      if (readdirSync(join(root, "accounts", provider)).length > 0) return true;
+    } catch {
+      // missing dir is simply "no accounts here"
+    }
+  }
+  return false;
+}
+
+const AGENT_LINK_HOME_DIR = (() => {
+  const explicit = process.env.AGENT_LINK_HOME ?? process.env.AGENT_AUTH_HOME;
+  if (explicit) return explicit;
+  const link = join(HOME, ".agent-link");
+  const auth = join(HOME, ".agent-auth");
+  if (hasAccounts(link)) return link;
+  if (hasAccounts(auth)) return auth;
+  return existsSync(link) ? link : auth;
+})();
+
 const AGENT_LINK_ROOT = join(AGENT_LINK_HOME_DIR, "accounts");
 // Hand-rolled slot layouts some setups use outside agent-link (read-only here).
 const EXTERNAL_ROOTS: Array<{ provider: "claude" | "codex"; root: string }> = [
