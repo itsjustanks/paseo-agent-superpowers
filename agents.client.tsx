@@ -322,19 +322,32 @@ Creates the slot and gives you the one command to finish the browser sign-in —
   };
 
   const primaryRow = (provider: "claude" | "codex") => {
+    const info = (scanQuery.data?.primaries ?? []).find((entry) => entry.provider === provider);
     const account = (provider === "claude" ? primaries?.claude : primaries?.codex) ?? "";
     const shared = account !== "" && isShared(provider, account);
+    const parked = (info?.cooldownUntil ?? 0) > 0;
     const bits = [`primary — what plain \`${provider}\` uses`];
+    if (info?.duplicated) bits.push("duplicated by an account below");
+    else if (parked)
+      bits.push(`parked ${Math.max(1, Math.round(((info?.cooldownUntil ?? 0) * 1000 - Date.now()) / 60000))}m — routing skips it`);
+    else bits.push(`in rotation · ${info?.launches ?? 0} launches`);
     if (shared) bits.push("shares one quota with an account below");
     const credit = provider === "claude" ? (scanQuery.data?.primaryCreditNote ?? "") : "";
     if (credit) bits.push(credit);
     return accountRow(
       `primary-${provider}`,
-      account ? STATUS.green : STATUS.orange,
+      account ? (parked ? STATUS.red : STATUS.green) : STATUS.orange,
       account || "not logged in",
       bits.join(" · "),
-      shared || credit !== "",
-      undefined,
+      shared || credit !== "" || parked,
+      account ? (
+        <Button
+          label={parked ? "Resume" : "Park 3h"}
+          kind="quiet"
+          theme={theme}
+          onPress={() => cooldownMutation.mutate({ provider, email: "primary", minutes: parked ? 0 : 180 })}
+        />
+      ) : undefined,
       undefined,
       account ? <View style={{ paddingLeft: 17, paddingTop: 2 }}>{usageFor(account)}</View> : undefined,
     );
