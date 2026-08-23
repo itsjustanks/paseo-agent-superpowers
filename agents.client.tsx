@@ -118,19 +118,20 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
         </View>
         {diagnosis[provider] ? <Text style={styles.monoText}>{diagnosis[provider]}</Text> : null}
         {auto ? (
-          <View style={tableRow}>
-            <Dot color={auto.wiredProviderId ? STATUS.green : theme.colors.foregroundMuted} />
-            <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
-              Auto-router — one provider that spreads new agents across these accounts
-            </Text>
-            {auto.wiredProviderId ? (
-              <Badge label={auto.wiredProviderId} theme={theme} tone="accent" />
-            ) : auto.launcherExists ? (
-              <Btn label="Wire auto-router" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
-            ) : (
-              <Text style={styles.muted}>run `agent-link auto` to enable</Text>
-            )}
-          </View>
+          accountRow(
+            `auto-${provider}`,
+            auto.wiredProviderId ? STATUS.green : theme.colors.foregroundMuted,
+            "Auto-router",
+            auto.wiredProviderId
+              ? `wired as ${auto.wiredProviderId} · new agents rotate across these accounts`
+              : auto.launcherExists
+                ? "one provider that rotates new agents across these accounts"
+                : "run `agent-link auto` in a terminal to enable",
+            false,
+            auto.wiredProviderId ? undefined : auto.launcherExists ? (
+              <Btn label="Wire" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
+            ) : undefined,
+          )
         ) : null}
         {rows}
         {provider === "claude" || provider === "codex" ? (
@@ -176,65 +177,76 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     );
   };
 
-  const slotRow = (slot: Slot) => (
-    <View key={slot.dir} style={tableRow}>
-      <Dot color={slotDot(slot)} />
-      <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
-        {slot.email}
-      </Text>
-      {slot.source === "external" ? <Badge label="external" theme={theme} /> : null}
-      {slot.wrongAccount ? <Badge label={`wrong: ${slot.actualEmail}`} theme={theme} tone="danger" /> : null}
-      {!slot.loggedIn ? <Badge label="login needed" theme={theme} tone="danger" /> : null}
-      {slot.loggedIn && isShared(slot.provider, slot.actualEmail || slot.email) ? (
-        <Badge label="⚠ same account as another entry — one shared quota" theme={theme} tone="danger" />
-      ) : null}
-      {slot.cooldownUntil > 0 ? (
-        <>
-          <Badge
-            label={`parked ${Math.max(1, Math.round((slot.cooldownUntil * 1000 - Date.now()) / 60000))}m`}
-            theme={theme}
-            tone="danger"
-          />
-          <Btn
-            label="Resume"
-            kind="quiet"
-            theme={theme}
-            onPress={() => cooldownMutation.mutate({ provider: slot.provider, email: slot.email, minutes: 0 })}
-          />
-        </>
-      ) : slot.loggedIn ? (
-        <Btn
-          label="Park 3h"
-          kind="quiet"
-          theme={theme}
-          onPress={() => cooldownMutation.mutate({ provider: slot.provider, email: slot.email, minutes: 180 })}
-        />
-      ) : null}
-      {slot.wiredProviderId ? (
-        <>
-          <Badge label={slot.wiredProviderId} theme={theme} tone="accent" />
-          {diagnoseBtn(slot.wiredProviderId, slot.dir)}
-        </>
-      ) : (
-        <Btn label="Wire into Paseo" theme={theme} onPress={() => wireMutation.mutate(slot)} />
-      )}
+  // Two lines per account: who it is on top, everything else muted underneath.
+  // Badges used to squeeze the email out of the row entirely on a narrow panel.
+  const accountRow = (
+    key: string,
+    dot: string,
+    email: string,
+    meta: string,
+    warn: boolean,
+    action?: React.ReactNode,
+    extra?: React.ReactNode,
+  ) => (
+    <View key={key} style={{ paddingVertical: 6, borderTopWidth: 1, borderTopColor: theme.colors.foregroundMuted + "1a" }}>
+      <View style={styles.rowBetween}>
+        <View style={[styles.row, { flexShrink: 1 }]}>
+          <Dot color={dot} />
+          <Text style={[styles.strong, { flexShrink: 1 }]} numberOfLines={1}>
+            {email}
+          </Text>
+        </View>
+        {action}
+      </View>
+      <View style={[styles.row, { paddingLeft: 17 }]}>
+        <Text style={warn ? styles.danger : styles.muted}>{meta}</Text>
+        {extra}
+      </View>
     </View>
   );
 
+  const slotRow = (slot: Slot) => {
+    const shared = slot.loggedIn && isShared(slot.provider, slot.actualEmail || slot.email);
+    const parked = slot.cooldownUntil > 0;
+    const bits: string[] = [];
+    if (!slot.loggedIn) bits.push("login needed");
+    else if (slot.wrongAccount) bits.push(`signed in as ${slot.actualEmail}`);
+    else if (parked) bits.push(`parked ${Math.max(1, Math.round((slot.cooldownUntil * 1000 - Date.now()) / 60000))}m`);
+    else bits.push("in rotation");
+    if (slot.source === "external") bits.push("external folder");
+    if (slot.wiredProviderId) bits.push(`provider: ${slot.wiredProviderId}`);
+    if (shared) bits.push("shares one quota with another entry");
+    return accountRow(
+      slot.dir,
+      slotDot(slot),
+      slot.email,
+      bits.join(" · "),
+      shared || slot.wrongAccount || !slot.loggedIn,
+      slot.loggedIn ? (
+        <Btn
+          label={parked ? "Resume" : "Park 3h"}
+          kind="quiet"
+          theme={theme}
+          onPress={() =>
+            cooldownMutation.mutate({ provider: slot.provider, email: slot.email, minutes: parked ? 0 : 180 })
+          }
+        />
+      ) : undefined,
+      slot.wiredProviderId ? diagnoseBtn(slot.wiredProviderId, slot.dir) : undefined,
+    );
+  };
+
   const primaryRow = (provider: "claude" | "codex") => {
-    const account = provider === "claude" ? primaries?.claude : primaries?.codex;
-    return (
-      <View style={tableRow}>
-        <Dot color={account ? STATUS.green : STATUS.orange} />
-        <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
-          {account || "not logged in"}
-        </Text>
-        <Badge label="primary" theme={theme} tone="accent" />
-        {account && isShared(provider, account) ? (
-          <Badge label="⚠ same account as a slot — one shared quota" theme={theme} tone="danger" />
-        ) : null}
-        <Text style={styles.muted}>builtin `{provider}`</Text>
-      </View>
+    const account = (provider === "claude" ? primaries?.claude : primaries?.codex) ?? "";
+    const shared = account !== "" && isShared(provider, account);
+    const bits = [`primary — what plain \`${provider}\` uses`];
+    if (shared) bits.push("shares one quota with an account below");
+    return accountRow(
+      `primary-${provider}`,
+      account ? STATUS.green : STATUS.orange,
+      account || "not logged in",
+      bits.join(" · "),
+      shared,
     );
   };
 
@@ -245,8 +257,8 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
         <Btn label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
       </View>
       <Text style={styles.subtitle}>
-        Every provider connector with its health, and every account under it. Wire an account into Paseo and it becomes a
-        parallel provider on its own rate limit.
+        Every provider and the accounts under it. A rate limit belongs to an account, so two entries on the same account
+        share one limit.
       </Text>
       <Text style={styles.muted}>status: 🟢 logged in / healthy · 🟠 login needed · 🔴 wrong account / failing</Text>
       <View style={styles.card}>
