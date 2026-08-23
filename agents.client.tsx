@@ -2,7 +2,7 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { accountUsage, addAccount, diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
 import { Badge, Btn, Dot, Meter, STATUS, makeStyles } from "./ui.client";
 
@@ -19,6 +19,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const [diagnosis, setDiagnosis] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [addingFor, setAddingFor] = useState<"claude" | "codex" | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
   // Every button inherits the compact (touch) sizing without repeating it.
@@ -345,9 +346,25 @@ Creates the slot and gives you the one command to finish the browser sign-in —
           {distinctPools === 1 ? "pool" : "pools"}
         </Text>
         <Text style={styles.muted}>
-          Paseo never fails over by itself — an agent that hits a limit stops and keeps its workspace. Wire the auto-router
-          so new agents rotate across accounts, and park one that runs out.
+          A rate limit belongs to an account. Wire the auto-router once and every new agent goes to the least-recently-used
+          healthy account; accounts that are parked or out of credit are skipped automatically. Running agents are never
+          re-routed, and resuming a chat always returns to the account that owns it.
         </Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="How to use this" onPress={() => setShowHelp((v) => !v)}>
+          <Text style={{ color: theme.colors.accent, fontSize: styles.compact ? 11 : 12, fontWeight: "600" }}>
+            {showHelp ? "Hide the basics" : "How do I use this?"}
+          </Text>
+        </Pressable>
+        {showHelp ? (
+          <View style={{ gap: 4 }}>
+            <Text style={styles.muted}>1. Wire the auto-router on each provider below, then pick that provider when you start agents.</Text>
+            <Text style={styles.muted}>2. Add accounts with + Add account; finish the browser sign-in with the command it gives you.</Text>
+            <Text style={styles.muted}>3. Park an account you want left alone; it rejoins rotation when the timer ends or you press Resume.</Text>
+            <Text style={styles.muted}>4. 7-day usage reads each account's own transcripts: sessions, tokens and models it ran.</Text>
+            <Text style={styles.muted}>5. The MCP tab manages servers across every account and provider at once.</Text>
+            <Text style={styles.monoText}>terminal equivalents: agent-link status · agent-link auto · agent-link cooldown</Text>
+          </View>
+        ) : null}
       </View>
 
       {scanQuery.data?.needsRestart ? (
