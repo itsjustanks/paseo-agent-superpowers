@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View } from "react-native";
 import { addAccount, diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
-import { Badge, Btn, Dot, STATUS, makeStyles } from "./ui.client";
+import { Badge, Btn, Dot, Meter, STATUS, makeStyles } from "./ui.client";
 
 export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const queryClient = useQueryClient();
@@ -20,6 +20,8 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const [addingFor, setAddingFor] = useState<"claude" | "codex" | null>(null);
   const [newEmail, setNewEmail] = useState("");
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
+  // Every button inherits the compact (touch) sizing without repeating it.
+  const Button = (props: React.ComponentProps<typeof Btn>) => <Btn compact={layout.compact} {...props} />;
 
   const scanQuery = useQuery({ queryKey: ["superpowers", "scan"], queryFn: () => callScan({}) });
   // Diagnostics spawn a real process per provider — for ACP providers (kimi,
@@ -90,10 +92,19 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     borderTopColor: theme.colors.foregroundMuted + "1a",
   };
 
+  const maxLaunches = Math.max(1, ...slots.map((entry) => entry.launches));
+  const agoLabel = (epoch: number) => {
+    const mins = Math.max(0, Math.round((Date.now() - epoch * 1000) / 60000));
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.round(mins / 60);
+    return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+  };
+
   const slotDot = (slot: Slot) => (slot.wrongAccount ? STATUS.red : slot.loggedIn ? STATUS.green : STATUS.orange);
 
   const diagnoseBtn = (providerId: string, key: string) => (
-    <Btn
+    <Button
       label="Diagnose"
       kind="quiet"
       theme={theme}
@@ -139,7 +150,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
                 : "run `agent-link auto` in a terminal to enable",
             false,
             auto.wiredProviderId ? undefined : auto.launcherExists ? (
-              <Btn label="Wire" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
+              <Button label="Wire" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
             ) : undefined,
           )
         ) : null}
@@ -164,13 +175,13 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
                 }}
               />
               <View style={styles.row}>
-                <Btn
+                <Button
                   label={addMutation.isPending ? "Starting…" : "Create & sign in"}
                   theme={theme}
                   disabled={addMutation.isPending || !newEmail.trim()}
                   onPress={() => addMutation.mutate({ provider, email: newEmail.trim() })}
                 />
-                <Btn label="Cancel" kind="quiet" theme={theme} onPress={() => setAddingFor(null)} />
+                <Button label="Cancel" kind="quiet" theme={theme} onPress={() => setAddingFor(null)} />
               </View>
               <Text style={styles.muted}>
                 Opens that CLI's own browser login. Sign in as exactly this account — the panel flags a mismatch.
@@ -179,7 +190,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           ) : (
             <View style={tableRow}>
               <Text style={[styles.muted, { flex: 1 }]}>Add another account to this provider</Text>
-              <Btn label="+ Add account" kind="quiet" theme={theme} onPress={() => { setAddingFor(provider); setNewEmail(""); }} />
+              <Button label="+ Add account" kind="quiet" theme={theme} onPress={() => { setAddingFor(provider); setNewEmail(""); }} />
             </View>
           )
         ) : null}
@@ -197,6 +208,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     warn: boolean,
     action?: React.ReactNode,
     extra?: React.ReactNode,
+    usage?: React.ReactNode,
   ) => (
     <View key={key} style={{ paddingVertical: 6, borderTopWidth: 1, borderTopColor: theme.colors.foregroundMuted + "1a" }}>
       <View style={styles.rowBetween}>
@@ -212,6 +224,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
         <Text style={warn ? styles.danger : styles.muted}>{meta}</Text>
         {extra}
       </View>
+      {usage}
     </View>
   );
 
@@ -233,7 +246,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       bits.join(" · "),
       shared || slot.wrongAccount || !slot.loggedIn,
       slot.loggedIn ? (
-        <Btn
+        <Button
           label={parked ? "Resume" : "Park 3h"}
           kind="quiet"
           theme={theme}
@@ -243,6 +256,19 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
         />
       ) : undefined,
       slot.wiredProviderId ? diagnoseBtn(slot.wiredProviderId, slot.dir) : undefined,
+      slot.loggedIn ? (
+        <View style={[styles.row, { paddingLeft: 17, paddingTop: 2 }]}>
+          <Meter
+            fraction={maxLaunches > 0 ? slot.launches / maxLaunches : 0}
+            color={parked ? STATUS.orange : theme.colors.accent}
+            theme={theme}
+          />
+          <Text style={styles.muted}>
+            {slot.launches} {slot.launches === 1 ? "launch" : "launches"}
+            {slot.lastUsed > 0 ? ` · ${agoLabel(slot.lastUsed)}` : ""}
+          </Text>
+        </View>
+      ) : undefined,
     );
   };
 
@@ -265,14 +291,14 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       <View style={styles.headerRow}>
         <Text style={styles.title}>Agent Link</Text>
         <View style={styles.row}>
-          <Btn
+          <Button
             label={healthQuery.isFetching ? "Checking…" : "Check health"}
             onPress={() => void healthQuery.refetch()}
             theme={theme}
             kind="quiet"
             disabled={healthQuery.isFetching}
           />
-          <Btn label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
+          <Button label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
         </View>
       </View>
       <Text style={styles.subtitle}>

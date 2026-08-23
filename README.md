@@ -11,6 +11,7 @@ One card per provider connector — **Claude Code, Codex, Kimi Code, Grok** — 
 - the **primary** account (the login your plain `claude` / `codex` uses), shown by email
 - every **account slot** with live state: 🟢 logged in · 🟠 login needed · 🔴 wrong account (the slot folder says one email, the login inside is another)
 - a **pool summary** — "5 logged-in entries → 4 independent quota pools" — and a ⚠ badge on any two entries signed into the *same* account, since a rate limit belongs to an account, not to a slot
+- **Usage per account** — a bar and a count showing how many agents the router has handed each account and when it was last used, so you can see the rotation actually spreading. (This is launches routed by agent-link, not Anthropic/OpenAI quota: neither CLI exposes remaining quota per account without reading its token, which this plugin deliberately does not do. Paseo's own usage figure covers the primary accounts only.)
 - **+ Add account** — add another account to any provider straight from the panel: it creates the slot and launches that CLI's own browser login, then the row turns green once you have signed in (it flags a mismatch if you sign in as someone else)
 - **Auto-router** — one click wires a single `Claude (Dynamic Agent Link)` / `Codex (Dynamic Agent Link)` provider that sends each new agent to the least-recently-used live account. Pick that one provider and your accounts get used automatically; a running agent is never re-routed.
 - **Park 3h / Resume** — take an account that hit its limit out of rotation and put it back
@@ -30,6 +31,10 @@ A universal manager for **user-level** MCP servers across every provider on the 
 - **Sync accounts** — pushes user-level definitions and project trust from each primary into its account slots
 
 Every write backs up the target config first (last 5 kept). A config file that exists but cannot be parsed is never overwritten.
+
+### Built for narrow screens
+
+Paseo plugins run on phones as well as desktop, so the panel uses one spacing scale that tightens on narrow layouts, buttons with real touch targets, account rows that put the identity on its own line above the detail, and an MCP destination table that stacks instead of squeezing labels to nothing.
 
 ## Install
 
@@ -57,6 +62,7 @@ The MCP tab manages **user-level** (global) servers — each provider's own conf
 
 Paseo has no automatic provider failover: an agent that hits a usage limit stops with an error and keeps its workspace — it does not move itself to another account. Three things reduce the pain, and the tab exposes all of them:
 
+- **Usage per account** — a bar and a count showing how many agents the router has handed each account and when it was last used, so you can see the rotation actually spreading. (This is launches routed by agent-link, not Anthropic/OpenAI quota: neither CLI exposes remaining quota per account without reading its token, which this plugin deliberately does not do. Paseo's own usage figure covers the primary accounts only.)
 - **+ Add account** — add another account to any provider straight from the panel: it creates the slot and launches that CLI's own browser login, then the row turns green once you have signed in (it flags a mismatch if you sign in as someone else)
 - **Auto-router** — one provider that picks a live account per launch, so agents spread across accounts without you choosing
 - **Park / Resume** — take an exhausted account out of rotation; new agents skip it until it recovers

@@ -62,6 +62,8 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
   const callRename = useRpc(mcpRename);
   const callHealth = useRpc(mcpHealth);
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
+  // Every button inherits the compact (touch) sizing without repeating it.
+  const Button = (props: React.ComponentProps<typeof Btn>) => <Btn compact={layout.compact} {...props} />;
 
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -200,22 +202,16 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
     return true;
   });
 
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: theme.colors.foregroundMuted + "44",
-    borderRadius: 7,
-    paddingVertical: 6,
-    paddingHorizontal: 9,
-    color: theme.colors.foreground,
-    fontSize: 12,
-  };
+  const inputStyle = styles.input;
+  // On a phone the destination row stacks: label above, actions below, so the
+  // label is never squeezed to nothing by the buttons.
   const tableRow = {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 8,
-    paddingVertical: 4,
+    flexDirection: layout.compact ? ("column" as const) : ("row" as const),
+    alignItems: layout.compact ? ("flex-start" as const) : ("center" as const),
+    gap: layout.compact ? 4 : 8,
+    paddingVertical: layout.compact ? 6 : 4,
     borderTopWidth: 1,
-    borderTopColor: theme.colors.foregroundMuted + "1a",
+    borderTopColor: theme.colors.foregroundMuted + "1f",
   };
 
   const renderEditor = (serverName: string) => (
@@ -223,13 +219,13 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
       <View style={styles.rowBetween}>
         <Text style={styles.strong}>Edit '{serverName}' — per destination</Text>
         <View style={styles.row}>
-          <Btn
+          <Button
             label={revealed ? "Hide secrets" : "Reveal secrets"}
             kind="quiet"
             theme={theme}
             onPress={() => loadEditor(serverName, !revealed)}
           />
-          <Btn label="Close editor" kind="quiet" theme={theme} onPress={closeEditor} />
+          <Button label="Close editor" kind="quiet" theme={theme} onPress={closeEditor} />
         </View>
       </View>
       <Text style={styles.muted}>
@@ -245,7 +241,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
           autoCapitalize="none"
           style={[inputStyle, { minWidth: 160 }]}
         />
-        <Btn
+        <Button
           label={renameMutation.isPending ? "Renaming…" : "Rename everywhere"}
           kind="quiet"
           theme={theme}
@@ -269,8 +265,8 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                   {dest.label}
                 </Text>
                 <Badge label={row.kind} theme={theme} />
-                {selected ? null : <Btn label="Edit" kind="quiet" theme={theme} onPress={() => selectRow(row)} />}
-                <Btn
+                {selected ? null : <Button label="Edit" kind="quiet" theme={theme} onPress={() => selectRow(row)} />}
+                <Button
                   label="Use for ALL"
                   kind="quiet"
                   theme={theme}
@@ -301,13 +297,13 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                     placeholderTextColor={theme.colors.foregroundMuted}
                   />
                   <View style={styles.row}>
-                    <Btn
+                    <Button
                       label={editOneMutation.isPending ? "Saving…" : "Save this destination"}
                       theme={theme}
                       onPress={() => editOneMutation.mutate(row.destId)}
                       disabled={editOneMutation.isPending}
                     />
-                    <Btn label="Cancel" kind="quiet" theme={theme} onPress={() => setEditDest(null)} />
+                    <Button label="Cancel" kind="quiet" theme={theme} onPress={() => setEditDest(null)} />
                   </View>
                 </View>
               ) : (
@@ -327,7 +323,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
             .map((row) => {
               const dest = destById(row.destId);
               return dest ? (
-                <Btn
+                <Button
                   key={row.destId}
                   label={`+ ${shortLabel(dest)}`}
                   kind="quiet"
@@ -366,10 +362,10 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
       <View style={styles.headerRow}>
         <Text style={styles.title}>MCP</Text>
         <View style={styles.row}>
-          <Btn label={healthRunning ? "Checking…" : "Health check"} onPress={runHealth} theme={theme} kind="quiet" disabled={healthRunning} />
-          <Btn label={showAdd ? "Close" : "Add server"} onPress={() => setShowAdd((v) => !v)} theme={theme} />
-          <Btn label={syncMutation.isPending ? "Syncing…" : "Sync accounts"} onPress={() => syncMutation.mutate()} theme={theme} kind="quiet" disabled={syncMutation.isPending} />
-          <Btn label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
+          <Button label={healthRunning ? "Checking…" : "Health check"} onPress={runHealth} theme={theme} kind="quiet" disabled={healthRunning} />
+          <Button label={showAdd ? "Close" : "Add server"} onPress={() => setShowAdd((v) => !v)} theme={theme} />
+          <Button label={syncMutation.isPending ? "Syncing…" : "Sync accounts"} onPress={() => syncMutation.mutate()} theme={theme} kind="quiet" disabled={syncMutation.isPending} />
+          <Button label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
         </View>
       </View>
 
@@ -408,7 +404,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
           <Text style={styles.strong}>Add MCP server</Text>
           <TextInput placeholder="name (e.g. my-server)" placeholderTextColor={theme.colors.foregroundMuted} value={formName} onChangeText={setFormName} autoCapitalize="none" style={inputStyle} />
           <View style={styles.row}>
-            <Btn label={`type: ${formKind}`} kind="quiet" theme={theme} onPress={() => setFormKind((k) => (k === "http" ? "stdio" : "http"))} />
+            <Button label={`type: ${formKind}`} kind="quiet" theme={theme} onPress={() => setFormKind((k) => (k === "http" ? "stdio" : "http"))} />
           </View>
           {formKind === "http" ? (
             <TextInput placeholder="https://example.com/mcp" placeholderTextColor={theme.colors.foregroundMuted} value={formUrl} onChangeText={setFormUrl} autoCapitalize="none" style={inputStyle} />
@@ -459,7 +455,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
             })}
           </View>
           <View style={styles.row}>
-            <Btn
+            <Button
               label={addMutation.isPending ? "Adding…" : formTargets.size > 0 ? `Add to ${formTargets.size} selected` : "Add to ALL"}
               theme={theme}
               onPress={() => addMutation.mutate()}
@@ -490,10 +486,10 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                   </Text>
                 </View>
                 <View style={styles.row}>
-                  <Btn label={isOpen ? "Hide" : "Details"} kind="quiet" theme={theme} onPress={() => setExpanded(isOpen ? null : server.name)} />
-                  <Btn label="Edit" theme={theme} onPress={() => loadEditor(server.name, false)} />
+                  <Button label={isOpen ? "Hide" : "Details"} kind="quiet" theme={theme} onPress={() => setExpanded(isOpen ? null : server.name)} />
+                  <Button label="Edit" theme={theme} onPress={() => loadEditor(server.name, false)} />
                   {server.presentIn.length < destinations.length ? (
-                    <Btn
+                    <Button
                       label="Add to all"
                       kind="quiet"
                       theme={theme}
@@ -523,19 +519,19 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
                     const confirming = pendingRemove?.name === server.name && pendingRemove.destId === dest.id;
                     return (
                       <View key={dest.id} style={tableRow}>
-                        <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
+                        <Text style={[styles.text, layout.compact ? { width: "100%" as const } : { flex: 1 }]} numberOfLines={1}>
+                          <Text style={present ? { color: theme.colors.accent } : styles.muted}>{present ? "✓ " : "— "}</Text>
                           {dest.label}
                         </Text>
-                        <Text style={present ? { color: theme.colors.accent, fontSize: 12 } : styles.muted}>{present ? "✓" : "—"}</Text>
                         {confirming ? (
                           <>
-                            <Btn label="Confirm remove" kind="danger" theme={theme} onPress={() => removeMutation.mutate({ name: server.name, targets: [dest.id] })} />
-                            <Btn label="Cancel" kind="quiet" theme={theme} onPress={() => setPendingRemove(null)} />
+                            <Button label="Confirm remove" kind="danger" theme={theme} onPress={() => removeMutation.mutate({ name: server.name, targets: [dest.id] })} />
+                            <Button label="Cancel" kind="quiet" theme={theme} onPress={() => setPendingRemove(null)} />
                           </>
                         ) : present ? (
-                          <Btn label="Remove" kind="quiet" theme={theme} onPress={() => setPendingRemove({ name: server.name, destId: dest.id })} />
+                          <Button label="Remove" kind="quiet" theme={theme} onPress={() => setPendingRemove({ name: server.name, destId: dest.id })} />
                         ) : (
-                          <Btn label="Add" kind="quiet" theme={theme} onPress={() => applyMutation.mutate({ name: server.name, targets: [dest.id] })} />
+                          <Button label="Add" kind="quiet" theme={theme} onPress={() => applyMutation.mutate({ name: server.name, targets: [dest.id] })} />
                         )}
                       </View>
                     );

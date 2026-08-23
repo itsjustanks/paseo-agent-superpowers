@@ -123,8 +123,8 @@ function envVarFor(provider: "claude" | "codex"): string {
   return provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
 }
 
-function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil">> {
-  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil">> = [];
+function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed">> {
+  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed">> = [];
   const seen = new Set<string>();
   const add = (provider: "claude" | "codex", dir: string, source: "agent-link" | "external") => {
     if (seen.has(dir)) return;
@@ -536,6 +536,16 @@ function poolsDir(): string {
   return join(AGENT_LINK_HOME_DIR, "state", "pools");
 }
 
+function poolNumber(kind: "count" | "last", provider: string, email: string): number {
+  try {
+    const raw = readFileSync(join(poolsDir(), `${kind}-${provider}-${email}`), "utf8").trim();
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function cooldownUntil(provider: string, email: string): number {
   try {
     const raw = readFileSync(join(poolsDir(), `cooldown-${provider}-${email}`), "utf8").trim();
@@ -567,6 +577,8 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     ...slot,
     wiredProviderId: providerIdForDir(overrides, slot.provider, slot.dir),
     cooldownUntil: cooldownUntil(slot.provider, slot.email),
+    launches: poolNumber("count", slot.provider, slot.email),
+    lastUsed: poolNumber("last", slot.provider, slot.email),
   }));
   const autoRouters = (["claude", "codex"] as const).map((provider) => ({
     provider,

@@ -11,6 +11,8 @@ export const SlotSchema = z.object({
   wrongAccount: z.boolean(),
   wiredProviderId: z.string().nullable(),
   cooldownUntil: z.number(), // epoch seconds; 0 = available
+  launches: z.number(), // agents this account has been handed by the router
+  lastUsed: z.number(), // epoch seconds; 0 = never
 });
 export type Slot = z.infer<typeof SlotSchema>;
 
