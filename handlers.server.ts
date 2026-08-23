@@ -178,9 +178,14 @@ type ProviderOverrides = Record<
   { extends?: string; env?: Record<string, string>; enabled?: boolean; label?: string } | undefined
 >;
 
+// The daemon returns config FLATTENED — providers live at config.providers,
+// even though a patch is written as { agents: { providers } }. Reading the
+// nested path silently yielded {} , so every provider looked unconfigured:
+// wired accounts showed as unwired and the auto-router always offered "Wire".
 async function providerOverrides(paseo: PluginHandlerContext["paseo"]): Promise<ProviderOverrides> {
   const { config } = await paseo.config.get();
-  return ((config as { agents?: { providers?: ProviderOverrides } }).agents?.providers ?? {}) as ProviderOverrides;
+  const shape = config as { providers?: ProviderOverrides; agents?: { providers?: ProviderOverrides } };
+  return (shape.providers ?? shape.agents?.providers ?? {}) as ProviderOverrides;
 }
 
 function providerIdForDir(overrides: ProviderOverrides, provider: "claude" | "codex", dir: string): string | null {
