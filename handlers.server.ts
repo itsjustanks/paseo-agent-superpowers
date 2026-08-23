@@ -784,8 +784,21 @@ export async function handleDiagnoseProvider({ providerId }: { providerId: strin
 // Real per-account usage, read from each account's own transcripts. Anthropic
 // does not expose remaining quota without the account token, so this reports
 // what the account actually did: sessions, tokens and models used in a window.
-function usageForClaudeDir(dir: string, sinceMs: number) {
-  const totals = { sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, lastActive: 0, models: new Set<string>() };
+function usageForClaudeDir(dir: string, sinceMs: number, days: number) {
+  const totals = {
+    sessions: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    lastActive: 0,
+    limitHits: 0,
+    limitLast: 0,
+    models: new Set<string>(),
+    daily: new Array<number>(days).fill(0),
+    topProject: "",
+  };
+  const perProject = new Map<string, number>();
   const projects = join(dir, "projects");
   let projectDirs: string[] = [];
   try {
@@ -793,6 +806,10 @@ function usageForClaudeDir(dir: string, sinceMs: number) {
   } catch {
     return totals;
   }
+  const dayOf = (ms: number) => {
+    const index = days - 1 - Math.floor((Date.now() - ms) / 86_400_000);
+    return index >= 0 && index < days ? index : -1;
+  };
   for (const projectDir of projectDirs) {
     let files: string[] = [];
     try {
@@ -811,10 +828,11 @@ function usageForClaudeDir(dir: string, sinceMs: number) {
       } catch {
         continue;
       }
-      if (mtime < sinceMs) continue;
-      if (size > 25_000_000) continue; // don't choke the panel on a giant transcript
+      if (mtime < sinceMs || size > 25_000_000) continue;
       totals.sessions += 1;
       totals.lastActive = Math.max(totals.lastActive, Math.floor(mtime / 1000));
+      const label = basename(projectDir).split("--").pop() ?? basename(projectDir);
+      perProject.set(label, (perProject.get(label) ?? 0) + 1);
       let text = "";
       try {
         text = readFileSync(file, "utf8");
@@ -822,45 +840,67 @@ function usageForClaudeDir(dir: string, sinceMs: number) {
         continue;
       }
       for (const line of text.split("\n")) {
-        if (!line || line.indexOf('"usage"') === -1) continue;
+        if (!line) continue;
+        // Cheap string test before paying for a JSON parse.
+        const hasUsage = line.indexOf('"usage"') !== -1;
+        const hasLimit = line.indexOf("spend limit") !== -1 || line.indexOf("usage limit") !== -1;
+        if (!hasUsage && !hasLimit) continue;
+        let entry: { message?: { usage?: Record<string, number>; model?: string }; timestamp?: string };
         try {
-          const entry = JSON.parse(line) as { message?: { usage?: Record<string, number>; model?: string } };
-          const usage = entry.message?.usage;
-          if (!usage) continue;
-          totals.inputTokens += Number(usage.input_tokens ?? 0);
-          totals.outputTokens += Number(usage.output_tokens ?? 0);
-          totals.cacheReadTokens += Number(usage.cache_read_input_tokens ?? 0);
-          if (entry.message?.model) totals.models.add(entry.message.model);
+          entry = JSON.parse(line);
         } catch {
-          // a partially written line is not worth failing the whole report
+          continue;
         }
+        const stamp = entry.timestamp ? Date.parse(entry.timestamp) : mtime;
+        if (hasLimit) {
+          totals.limitHits += 1;
+          totals.limitLast = Math.max(totals.limitLast, Math.floor((Number.isFinite(stamp) ? stamp : mtime) / 1000));
+        }
+        const usage = entry.message?.usage;
+        if (!usage) continue;
+        const out = Number(usage.output_tokens ?? 0);
+        totals.inputTokens += Number(usage.input_tokens ?? 0);
+        totals.outputTokens += out;
+        totals.cacheReadTokens += Number(usage.cache_read_input_tokens ?? 0);
+        totals.cacheCreationTokens += Number(usage.cache_creation_input_tokens ?? 0);
+        const bucket = dayOf(Number.isFinite(stamp) ? stamp : mtime);
+        if (bucket >= 0) totals.daily[bucket] += out;
+        const model = entry.message?.model;
+        if (model && model !== "<synthetic>") totals.models.add(model);
       }
     }
   }
+  totals.topProject = [...perProject.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
   return totals;
 }
 
 export async function handleAccountUsage({ days }: { days: number }) {
-  const sinceMs = Date.now() - Math.max(1, days) * 86_400_000;
-  const accounts = [] as Array<{
-    provider: "claude" | "codex";
-    email: string;
-    sessions: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    lastActive: number;
-    models: string[];
-  }>;
+  const window = Math.max(1, Math.min(30, days));
+  const sinceMs = Date.now() - window * 86_400_000;
+  const shape = (provider: "claude" | "codex", email: string, dir: string) => {
+    const t = usageForClaudeDir(dir, sinceMs, window);
+    return {
+      provider,
+      email,
+      sessions: t.sessions,
+      inputTokens: t.inputTokens,
+      outputTokens: t.outputTokens,
+      cacheReadTokens: t.cacheReadTokens,
+      cacheCreationTokens: t.cacheCreationTokens,
+      lastActive: t.lastActive,
+      limitHits: t.limitHits,
+      limitLast: t.limitLast,
+      daily: t.daily,
+      topProject: t.topProject,
+      models: [...t.models].sort(),
+    };
+  };
+  const accounts = [];
   const primaryEmail = claudeAccountEmail(HOME);
-  if (primaryEmail) {
-    const totals = usageForClaudeDir(join(HOME, ".claude"), sinceMs);
-    accounts.push({ provider: "claude", email: primaryEmail, ...totals, models: [...totals.models].sort() });
-  }
+  if (primaryEmail) accounts.push(shape("claude", primaryEmail, join(HOME, ".claude")));
   for (const slot of collectSlots()) {
     if (slot.provider !== "claude") continue;
-    const totals = usageForClaudeDir(slot.dir, sinceMs);
-    accounts.push({ provider: "claude", email: slot.email, ...totals, models: [...totals.models].sort() });
+    accounts.push(shape("claude", slot.email, slot.dir));
   }
   return { accounts };
 }

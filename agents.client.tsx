@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { accountUsage, addAccount, diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
-import { Badge, Btn, Dot, Meter, STATUS, makeStyles } from "./ui.client";
+import { Badge, Btn, Dot, Meter, Spark, STATUS, makeStyles } from "./ui.client";
 
 export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const queryClient = useQueryClient();
@@ -114,11 +114,30 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     const row = (usageQuery.data?.accounts ?? []).find((entry) => entry.email === email);
     if (!row) return null;
     if (row.sessions === 0) return <Text style={styles.muted}>7 days: no sessions</Text>;
+    // Cache reads are input the account did not pay full price for.
+    const totalIn = row.inputTokens + row.cacheReadTokens + row.cacheCreationTokens;
+    const cachePct = totalIn > 0 ? Math.round((row.cacheReadTokens / totalIn) * 100) : 0;
     return (
-      <Text style={styles.muted}>
-        7 days: {row.sessions} {row.sessions === 1 ? "session" : "sessions"} · {fmt(row.inputTokens)} in ·{" "}
-        {fmt(row.outputTokens)} out{row.models.length > 0 ? ` · ${row.models.join(", ")}` : ""}
-      </Text>
+      <View style={{ gap: 3 }}>
+        <View style={styles.row}>
+          <Spark values={row.daily} color={theme.colors.accent} theme={theme} />
+          <Text style={styles.muted}>
+            {row.sessions} {row.sessions === 1 ? "session" : "sessions"} · {fmt(row.outputTokens)} out · {cachePct}% cached
+          </Text>
+        </View>
+        {row.limitHits > 0 ? (
+          <Text style={styles.danger}>
+            {row.limitHits} limit {row.limitHits === 1 ? "refusal" : "refusals"} in 7 days
+            {row.limitLast > 0 ? ` · last ${agoLabel(row.limitLast)}` : ""} — park it or probe the model
+          </Text>
+        ) : null}
+        <View style={styles.row}>
+          {row.models.slice(0, 4).map((model) => (
+            <Badge key={model} label={model.replace("claude-", "")} theme={theme} />
+          ))}
+          {row.topProject ? <Text style={styles.muted}>mostly {row.topProject}</Text> : null}
+        </View>
+      </View>
     );
   };
 
@@ -310,6 +329,9 @@ Creates the slot and gives you the one command to finish the browser sign-in —
       account || "not logged in",
       bits.join(" · "),
       shared || credit !== "",
+      undefined,
+      undefined,
+      account ? <View style={{ paddingLeft: 17, paddingTop: 2 }}>{usageFor(account)}</View> : undefined,
     );
   };
 

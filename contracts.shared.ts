@@ -93,6 +93,11 @@ export const AccountUsageSchema = z.object({
   cacheReadTokens: z.number(),
   lastActive: z.number(), // epoch seconds, 0 = none in window
   models: z.array(z.string()),
+  cacheCreationTokens: z.number(),
+  limitHits: z.number(), // times this account was refused for a limit
+  limitLast: z.number(), // epoch seconds of the most recent refusal
+  daily: z.array(z.number()), // output tokens per day, oldest first
+  topProject: z.string(),
 });
 export type AccountUsage = z.infer<typeof AccountUsageSchema>;
 

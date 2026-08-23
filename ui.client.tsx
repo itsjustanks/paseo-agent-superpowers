@@ -99,6 +99,26 @@ export function Meter({ fraction, color, theme }: { fraction: number; color: str
   );
 }
 
+// Tiny bar chart — daily activity at a glance without a chart library.
+export function Spark({ values, color, theme }: { values: number[]; color: string; theme: PluginTheme }) {
+  const max = Math.max(1, ...values);
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 16 }}>
+      {values.map((value, index) => (
+        <View
+          key={index}
+          style={{
+            width: 5,
+            height: Math.max(2, Math.round((value / max) * 16)),
+            borderRadius: 1,
+            backgroundColor: value > 0 ? color : theme.colors.foregroundMuted + "33",
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
 export function Badge({ label, theme, tone }: { label: string; theme: PluginTheme; tone?: "danger" | "accent" }) {
   const color =
     tone === "danger" ? theme.colors.statusDanger : tone === "accent" ? theme.colors.accent : theme.colors.foregroundMuted;
