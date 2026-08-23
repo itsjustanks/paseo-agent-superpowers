@@ -15,6 +15,7 @@ export const SlotSchema = z.object({
   lastUsed: z.number(), // epoch seconds; 0 = never
   creditNote: z.string(), // "" when fine, else e.g. "out of credits"
   blocked: z.boolean(), // spend limit reached — routing skips it
+  parkReason: z.string(), // why it is parked, "" when not parked
 });
 export type Slot = z.infer<typeof SlotSchema>;
 

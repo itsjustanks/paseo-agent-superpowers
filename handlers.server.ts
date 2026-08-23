@@ -145,8 +145,8 @@ function envVarFor(provider: "claude" | "codex"): string {
   return provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
 }
 
-function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked">> {
-  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked">> = [];
+function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked" | "parkReason">> {
+  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked" | "parkReason">> = [];
   const seen = new Set<string>();
   const add = (provider: "claude" | "codex", dir: string, source: "agent-link" | "external") => {
     if (seen.has(dir)) return;
@@ -568,6 +568,14 @@ function poolNumber(kind: "count" | "last", provider: string, email: string): nu
   }
 }
 
+function parkReason(provider: string, email: string): string {
+  try {
+    return readFileSync(join(poolsDir(), `reason-${provider}-${email}`), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 function cooldownUntil(provider: string, email: string): number {
   try {
     const raw = readFileSync(join(poolsDir(), `cooldown-${provider}-${email}`), "utf8").trim();
@@ -605,6 +613,7 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     launches: poolNumber("count", slot.provider, slot.email),
     creditNote: creditNote(slot.provider, slot.dir),
     blocked: isBlocked(slot.provider, slot.dir),
+    parkReason: parkReason(slot.provider, slot.email),
     lastUsed: poolNumber("last", slot.provider, slot.email),
   }));
   const autoRouters = (["claude", "codex"] as const).map((provider) => ({

@@ -274,7 +274,12 @@ Creates the slot and gives you the one command to finish the browser sign-in —
     const bits: string[] = [];
     if (!slot.loggedIn) bits.push("login needed");
     else if (slot.wrongAccount) bits.push(`signed in as ${slot.actualEmail}`);
-    else if (parked) bits.push(`parked ${Math.max(1, Math.round((slot.cooldownUntil * 1000 - Date.now()) / 60000))}m`);
+    else if (parked)
+      bits.push(
+        `parked ${Math.max(1, Math.round((slot.cooldownUntil * 1000 - Date.now()) / 60000))}m — ${
+          slot.parkReason || "routing skips it"
+        }`,
+      );
     else bits.push("in rotation");
     if (slot.source === "external") bits.push("external folder");
     if (slot.wiredProviderId) bits.push(`provider: ${slot.wiredProviderId}`);
@@ -381,7 +386,7 @@ Creates the slot and gives you the one command to finish the browser sign-in —
           <View style={{ gap: 4 }}>
             <Text style={styles.muted}>1. Wire the auto-router on each provider below, then pick that provider when you start agents.</Text>
             <Text style={styles.muted}>2. Add accounts with + Add account; finish the browser sign-in with the command it gives you.</Text>
-            <Text style={styles.muted}>3. Park an account you want left alone; it rejoins rotation when the timer ends or you press Resume.</Text>
+            <Text style={styles.muted}>3. Accounts refused for a limit park themselves — later launches skip them with no action from you.</Text>
             <Text style={styles.muted}>4. 7-day usage reads each account's own transcripts: sessions, tokens and models it ran.</Text>
             <Text style={styles.muted}>5. An account can be healthy yet refuse a specific model. Check with: agent-link probe claude claude-fable-5 --park</Text>
             <Text style={styles.muted}>6. The MCP tab manages servers across every account and provider at once.</Text>
