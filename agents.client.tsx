@@ -361,7 +361,8 @@ Creates the slot and gives you the one command to finish the browser sign-in —
             <Text style={styles.muted}>2. Add accounts with + Add account; finish the browser sign-in with the command it gives you.</Text>
             <Text style={styles.muted}>3. Park an account you want left alone; it rejoins rotation when the timer ends or you press Resume.</Text>
             <Text style={styles.muted}>4. 7-day usage reads each account's own transcripts: sessions, tokens and models it ran.</Text>
-            <Text style={styles.muted}>5. The MCP tab manages servers across every account and provider at once.</Text>
+            <Text style={styles.muted}>5. An account can be healthy yet refuse a specific model. Check with: agent-link probe claude claude-fable-5 --park</Text>
+            <Text style={styles.muted}>6. The MCP tab manages servers across every account and provider at once.</Text>
             <Text style={styles.monoText}>terminal equivalents: agent-link status · agent-link auto · agent-link cooldown</Text>
           </View>
         ) : null}

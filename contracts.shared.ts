@@ -14,6 +14,7 @@ export const SlotSchema = z.object({
   launches: z.number(), // agents this account has been handed by the router
   lastUsed: z.number(), // epoch seconds; 0 = never
   creditNote: z.string(), // "" when fine, else e.g. "out of credits"
+  blocked: z.boolean(), // spend limit reached — routing skips it
 });
 export type Slot = z.infer<typeof SlotSchema>;
 
@@ -32,6 +33,17 @@ export const scan = defineRpc({
     slots: z.array(SlotSchema),
     primaryAccounts: z.object({ claude: z.string(), codex: z.string() }),
     primaryCreditNote: z.string(),
+    primaries: z.array(
+      z.object({
+        provider: z.enum(["claude", "codex"]),
+        email: z.string(),
+        launches: z.number(),
+        cooldownUntil: z.number(),
+        blocked: z.boolean(),
+        duplicated: z.boolean(), // an account slot already holds this account
+      }),
+    ),
+    nextUp: z.array(z.object({ provider: z.enum(["claude", "codex"]), email: z.string() })),
     autoRouters: z.array(AutoRouterSchema),
     agentAuthInstalled: z.boolean(),
     needsRestart: z.boolean(),

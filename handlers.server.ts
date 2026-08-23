@@ -127,17 +127,26 @@ function creditNote(provider: "claude" | "codex", dir: string): string {
   if (!config) return "";
   const reason = config.cachedExtraUsageDisabledReason;
   if (typeof reason !== "string" || reason === "") return "";
-  if (reason === "out_of_credits") return "out of credits — extra usage exhausted";
-  if (reason.startsWith("org_level_disabled")) return "extra usage disabled for this org";
+  if (reason === "out_of_credits") return "extra usage exhausted (may still serve some models)";
+  if (reason.startsWith("org_level_disabled")) return "extra usage disabled for this org (may refuse premium models)";
   return `extra usage unavailable (${reason})`;
+}
+
+// Same rule the router uses: extra usage exhausted and no subscription
+// allowance left means the account cannot serve, so rotation skips it.
+// Measured, not assumed. An account flagged "out of credits" can still serve a
+// model while an unflagged one refuses, so this never gates routing — parking
+// (set by `agent-link probe --park`, or by hand) is the real signal.
+function isBlocked(_provider: "claude" | "codex", _dir: string): boolean {
+  return false;
 }
 
 function envVarFor(provider: "claude" | "codex"): string {
   return provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
 }
 
-function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote">> {
-  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote">> = [];
+function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked">> {
+  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked">> = [];
   const seen = new Set<string>();
   const add = (provider: "claude" | "codex", dir: string, source: "agent-link" | "external") => {
     if (seen.has(dir)) return;
@@ -595,6 +604,7 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     cooldownUntil: cooldownUntil(slot.provider, slot.email),
     launches: poolNumber("count", slot.provider, slot.email),
     creditNote: creditNote(slot.provider, slot.dir),
+    blocked: isBlocked(slot.provider, slot.dir),
     lastUsed: poolNumber("last", slot.provider, slot.email),
   }));
   const autoRouters = (["claude", "codex"] as const).map((provider) => ({
@@ -607,6 +617,33 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     slots,
     primaryAccounts: { claude: claudeAccountEmail(HOME), codex: codexAccountEmail(join(HOME, ".codex")) },
     primaryCreditNote: creditNote("claude", HOME),
+    primaries: (["claude", "codex"] as const).map((provider) => {
+      const dir = provider === "claude" ? HOME : join(HOME, ".codex");
+      const email = provider === "claude" ? claudeAccountEmail(HOME) : codexAccountEmail(dir);
+      return {
+        provider,
+        email,
+        launches: poolNumber("count", provider, "primary"),
+        cooldownUntil: cooldownUntil(provider, "primary"),
+        blocked: isBlocked(provider, dir),
+        duplicated: slots.some((slot) => slot.provider === provider && (slot.actualEmail || slot.email) === email),
+      };
+    }),
+    nextUp: (["claude", "codex"] as const).map((provider) => {
+      const dir = provider === "claude" ? HOME : join(HOME, ".codex");
+      const primaryEmail = provider === "claude" ? claudeAccountEmail(HOME) : codexAccountEmail(dir);
+      const candidates: Array<{ email: string; last: number }> = [];
+      const duplicated = slots.some((slot) => slot.provider === provider && (slot.actualEmail || slot.email) === primaryEmail);
+      if (primaryEmail && !duplicated && !isBlocked(provider, dir) && cooldownUntil(provider, "primary") === 0) {
+        candidates.push({ email: primaryEmail, last: poolNumber("last", provider, "primary") });
+      }
+      for (const slot of slots) {
+        if (slot.provider !== provider || !slot.loggedIn || slot.blocked || slot.cooldownUntil > 0) continue;
+        candidates.push({ email: slot.email, last: slot.lastUsed });
+      }
+      candidates.sort((a, b) => a.last - b.last);
+      return { provider, email: candidates[0]?.email ?? "" };
+    }),
     autoRouters,
     agentAuthInstalled: agentLinkInstalled(),
     needsRestart,
