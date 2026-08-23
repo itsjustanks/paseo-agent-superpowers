@@ -145,8 +145,8 @@ function envVarFor(provider: "claude" | "codex"): string {
   return provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
 }
 
-function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked" | "parkReason">> {
-  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked" | "parkReason">> = [];
+function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked" | "parkReason" | "outputStyle" | "settingsDrift">> {
+  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote" | "blocked" | "parkReason" | "outputStyle" | "settingsDrift">> = [];
   const seen = new Set<string>();
   const add = (provider: "claude" | "codex", dir: string, source: "agent-link" | "external") => {
     if (seen.has(dir)) return;
@@ -573,6 +573,18 @@ function poolNumber(kind: "count" | "last", provider: string, email: string): nu
   }
 }
 
+// Which preferences differ from the primary — an account out of step behaves
+// differently for no visible reason.
+function settingsDrift(provider: "claude" | "codex", dir: string): { style: string; drift: string[] } {
+  if (provider !== "claude") return { style: "", drift: [] };
+  const base = readJson(join(HOME, ".claude", "settings.json")) ?? {};
+  const own = readJson(join(dir, "settings.json")) ?? {};
+  const drift = SYNC_SETTINGS_KEYS.filter(
+    (key) => key in base && JSON.stringify(own[key]) !== JSON.stringify(base[key]),
+  );
+  return { style: typeof own.outputStyle === "string" ? own.outputStyle : "", drift };
+}
+
 function parkReason(provider: string, email: string): string {
   try {
     return readFileSync(join(poolsDir(), `reason-${provider}-${email}`), "utf8").trim();
@@ -619,6 +631,8 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     creditNote: creditNote(slot.provider, slot.dir),
     blocked: isBlocked(slot.provider, slot.dir),
     parkReason: parkReason(slot.provider, slot.email),
+    outputStyle: settingsDrift(slot.provider, slot.dir).style,
+    settingsDrift: settingsDrift(slot.provider, slot.dir).drift,
     lastUsed: poolNumber("last", slot.provider, slot.email),
   }));
   const autoRouters = (["claude", "codex"] as const).map((provider) => ({
@@ -1280,6 +1294,10 @@ export async function handleMcpHealth(_input: Record<string, never>, { paseo }: 
 // Copies user-level MCP definitions + project trust from each provider's
 // primary config into its account slots. Never credentials.
 const SYNC_GLOBAL_FLAGS = ["hasCompletedOnboarding", "bypassPermissionsModeAccepted", "theme", "autoUpdates", "effortLevel"];
+// Preferences that should be identical on every account, so an agent behaves
+// the same wherever rotation sends it.
+const SYNC_SETTINGS_KEYS = ["outputStyle", "includeCoAuthoredBy", "env", "permissions", "model"];
+
 const SYNC_PROJECT_FIELDS = [
   "hasTrustDialogAccepted",
   "hasCompletedProjectOnboarding",
@@ -1378,6 +1396,43 @@ export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
       logs.push(`claude · ${slot.email}: ${Object.keys(mcp).length} MCP servers, ${trusted} trusted projects`);
     }
   }
+  // settings.json + custom output styles (Claude accounts)
+  const primarySettingsPath = join(HOME, ".claude", "settings.json");
+  const primarySettings = existsSync(primarySettingsPath) ? readJson(primarySettingsPath) : null;
+  if (primarySettings) {
+    for (const slot of slots.filter((entry) => entry.provider === "claude")) {
+      const target = join(slot.dir, "settings.json");
+      const current = existsSync(target) ? (readJson(target) ?? {}) : {};
+      let changed = 0;
+      for (const key of SYNC_SETTINGS_KEYS) {
+        if (key in primarySettings && JSON.stringify(current[key]) !== JSON.stringify(primarySettings[key])) {
+          current[key] = primarySettings[key];
+          changed += 1;
+        }
+      }
+      if (changed > 0) {
+        backupFile(target);
+        writeJsonAtomic(target, current);
+      }
+      logs.push(`claude · ${slot.email}: settings ${changed > 0 ? `updated (${changed})` : "already match"}`);
+    }
+  }
+  const primaryStyles = join(HOME, ".claude", "output-styles");
+  if (existsSync(primaryStyles)) {
+    let styles: string[] = [];
+    try {
+      styles = readdirSync(primaryStyles).filter((name) => name.endsWith(".md"));
+    } catch {
+      styles = [];
+    }
+    for (const slot of slots.filter((entry) => entry.provider === "claude")) {
+      const dest = join(slot.dir, "output-styles");
+      mkdirSync(dest, { recursive: true });
+      for (const name of styles) copyFileSync(join(primaryStyles, name), join(dest, name));
+    }
+    if (styles.length > 0) logs.push(`output styles synced (${styles.length})`);
+  }
+
   const codexPrimary = join(HOME, ".codex", "config.toml");
   if (existsSync(codexPrimary)) {
     // Copy only the MCP blocks the slot is missing, never the whole file — the
@@ -1406,7 +1461,9 @@ export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
           : `${text.replace(/\n*$/, "\n")}${pin}\n`;
         backupFile(path);
         writeFileSync(path, text);
-        logs.push(`codex · ${slot.email}: ${added} MCP server(s) added, ${existing.size} kept as-is, file-store pinned`);
+        const agentsMd = join(HOME, ".codex", "AGENTS.md");
+        if (existsSync(agentsMd)) copyFileSync(agentsMd, join(slot.dir, "AGENTS.md"));
+        logs.push(`codex · ${slot.email}: ${added} MCP server(s) added, ${existing.size} kept as-is, instructions + pin synced`);
       } catch (error) {
         logs.push(`codex · ${slot.email}: SKIPPED — ${error instanceof Error ? error.message : String(error)}`);
       }

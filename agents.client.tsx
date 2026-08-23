@@ -285,6 +285,8 @@ Creates the slot and gives you the one command to finish the browser sign-in —
     if (slot.wiredProviderId) bits.push(`provider: ${slot.wiredProviderId}`);
     if (shared) bits.push("shares one quota with another entry");
     if (slot.creditNote) bits.push(slot.creditNote);
+    if (slot.settingsDrift.length > 0) bits.push(`settings differ from primary: ${slot.settingsDrift.join(", ")} — press Sync`);
+    else if (slot.outputStyle) bits.push(`style: ${slot.outputStyle}`);
     return accountRow(
       slot.dir,
       slotDot(slot),
