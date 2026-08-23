@@ -72,6 +72,24 @@ export const diagnoseProvider = defineRpc({
   output: z.object({ summary: z.string() }),
 });
 
+export const AccountUsageSchema = z.object({
+  provider: z.enum(["claude", "codex"]),
+  email: z.string(),
+  sessions: z.number(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  cacheReadTokens: z.number(),
+  lastActive: z.number(), // epoch seconds, 0 = none in window
+  models: z.array(z.string()),
+});
+export type AccountUsage = z.infer<typeof AccountUsageSchema>;
+
+export const accountUsage = defineRpc({
+  name: "superpowers.account-usage",
+  input: z.object({ days: z.number() }),
+  output: z.object({ accounts: z.array(AccountUsageSchema) }),
+});
+
 export const providerHealth = defineRpc({
   name: "superpowers.provider-health",
   input: z.object({}),

@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View } from "react-native";
-import { addAccount, diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
+import { accountUsage, addAccount, diagnoseProvider, providerHealth, scan, setCooldown, wireAuto, wireProvider, type Slot } from "./contracts.shared";
 import { Badge, Btn, Dot, Meter, STATUS, makeStyles } from "./ui.client";
 
 export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
@@ -15,6 +15,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const callWireAuto = useRpc(wireAuto);
   const callCooldown = useRpc(setCooldown);
   const callAddAccount = useRpc(addAccount);
+  const callUsage = useRpc(accountUsage);
   const [diagnosis, setDiagnosis] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [addingFor, setAddingFor] = useState<"claude" | "codex" | null>(null);
@@ -26,6 +27,12 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const scanQuery = useQuery({ queryKey: ["superpowers", "scan"], queryFn: () => callScan({}) });
   // Diagnostics spawn a real process per provider — for ACP providers (kimi,
   // grok) that starts an agent session. Only on request, never on mount.
+  // Aggregating transcripts costs real IO, so it is on request like health.
+  const usageQuery = useQuery({
+    queryKey: ["superpowers", "account-usage"],
+    queryFn: () => callUsage({ days: 7 }),
+    enabled: false,
+  });
   const healthQuery = useQuery({
     queryKey: ["superpowers", "provider-health"],
     queryFn: () => callHealth({}),
@@ -99,6 +106,19 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     if (mins < 60) return `${mins}m ago`;
     const hours = Math.round(mins / 60);
     return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+  };
+
+  const fmt = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+  const usageFor = (email: string) => {
+    const row = (usageQuery.data?.accounts ?? []).find((entry) => entry.email === email);
+    if (!row) return null;
+    if (row.sessions === 0) return <Text style={styles.muted}>7 days: no sessions</Text>;
+    return (
+      <Text style={styles.muted}>
+        7 days: {row.sessions} {row.sessions === 1 ? "session" : "sessions"} · {fmt(row.inputTokens)} in ·{" "}
+        {fmt(row.outputTokens)} out{row.models.length > 0 ? ` · ${row.models.join(", ")}` : ""}
+      </Text>
+    );
   };
 
   const slotDot = (slot: Slot) => (slot.wrongAccount ? STATUS.red : slot.loggedIn ? STATUS.green : STATUS.orange);
@@ -258,7 +278,8 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       ) : undefined,
       slot.wiredProviderId ? diagnoseBtn(slot.wiredProviderId, slot.dir) : undefined,
       slot.loggedIn ? (
-        <View style={[styles.row, { paddingLeft: 17, paddingTop: 2 }]}>
+        <View style={{ paddingLeft: 17, paddingTop: 2, gap: 3 }}>
+        <View style={styles.row}>
           <Meter
             fraction={maxLaunches > 0 ? slot.launches / maxLaunches : 0}
             color={parked ? STATUS.orange : theme.colors.accent}
@@ -268,6 +289,8 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
             {slot.launches} {slot.launches === 1 ? "launch" : "launches"}
             {slot.lastUsed > 0 ? ` · ${agoLabel(slot.lastUsed)}` : ""}
           </Text>
+        </View>
+        {usageFor(slot.actualEmail || slot.email)}
         </View>
       ) : undefined,
     );
@@ -294,6 +317,13 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
       <View style={styles.headerRow}>
         <Text style={styles.title}>Agent Link</Text>
         <View style={styles.row}>
+          <Button
+            label={usageQuery.isFetching ? "Reading…" : "7-day usage"}
+            onPress={() => void usageQuery.refetch()}
+            theme={theme}
+            kind="quiet"
+            disabled={usageQuery.isFetching}
+          />
           <Button
             label={healthQuery.isFetching ? "Checking…" : "Check health"}
             onPress={() => void healthQuery.refetch()}

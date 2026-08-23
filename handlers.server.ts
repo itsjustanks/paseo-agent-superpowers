@@ -1,6 +1,6 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { execFileSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import type { Destination, Slot } from "./contracts.shared";
@@ -755,6 +755,90 @@ export async function handleDiagnoseProvider({ providerId }: { providerId: strin
   } catch (error) {
     return { summary: `diagnostic failed: ${error instanceof Error ? error.message : String(error)}` };
   }
+}
+
+// Real per-account usage, read from each account's own transcripts. Anthropic
+// does not expose remaining quota without the account token, so this reports
+// what the account actually did: sessions, tokens and models used in a window.
+function usageForClaudeDir(dir: string, sinceMs: number) {
+  const totals = { sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, lastActive: 0, models: new Set<string>() };
+  const projects = join(dir, "projects");
+  let projectDirs: string[] = [];
+  try {
+    projectDirs = readdirSync(projects).map((entry) => join(projects, entry));
+  } catch {
+    return totals;
+  }
+  for (const projectDir of projectDirs) {
+    let files: string[] = [];
+    try {
+      files = readdirSync(projectDir).filter((name) => name.endsWith(".jsonl"));
+    } catch {
+      continue;
+    }
+    for (const name of files) {
+      const file = join(projectDir, name);
+      let mtime = 0;
+      let size = 0;
+      try {
+        const info = statSync(file);
+        mtime = info.mtimeMs;
+        size = info.size;
+      } catch {
+        continue;
+      }
+      if (mtime < sinceMs) continue;
+      if (size > 25_000_000) continue; // don't choke the panel on a giant transcript
+      totals.sessions += 1;
+      totals.lastActive = Math.max(totals.lastActive, Math.floor(mtime / 1000));
+      let text = "";
+      try {
+        text = readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      for (const line of text.split("\n")) {
+        if (!line || line.indexOf('"usage"') === -1) continue;
+        try {
+          const entry = JSON.parse(line) as { message?: { usage?: Record<string, number>; model?: string } };
+          const usage = entry.message?.usage;
+          if (!usage) continue;
+          totals.inputTokens += Number(usage.input_tokens ?? 0);
+          totals.outputTokens += Number(usage.output_tokens ?? 0);
+          totals.cacheReadTokens += Number(usage.cache_read_input_tokens ?? 0);
+          if (entry.message?.model) totals.models.add(entry.message.model);
+        } catch {
+          // a partially written line is not worth failing the whole report
+        }
+      }
+    }
+  }
+  return totals;
+}
+
+export async function handleAccountUsage({ days }: { days: number }) {
+  const sinceMs = Date.now() - Math.max(1, days) * 86_400_000;
+  const accounts = [] as Array<{
+    provider: "claude" | "codex";
+    email: string;
+    sessions: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    lastActive: number;
+    models: string[];
+  }>;
+  const primaryEmail = claudeAccountEmail(HOME);
+  if (primaryEmail) {
+    const totals = usageForClaudeDir(join(HOME, ".claude"), sinceMs);
+    accounts.push({ provider: "claude", email: primaryEmail, ...totals, models: [...totals.models].sort() });
+  }
+  for (const slot of collectSlots()) {
+    if (slot.provider !== "claude") continue;
+    const totals = usageForClaudeDir(slot.dir, sinceMs);
+    accounts.push({ provider: "claude", email: slot.email, ...totals, models: [...totals.models].sort() });
+  }
+  return { accounts };
 }
 
 export async function handleProviderHealth(_input: Record<string, never>, { paseo }: PluginHandlerContext) {

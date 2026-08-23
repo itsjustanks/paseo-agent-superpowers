@@ -11,6 +11,7 @@ import {
   mcpRemove,
   mcpSync,
   providerHealth,
+  accountUsage,
   addAccount,
   scan,
   setCooldown,
@@ -28,6 +29,7 @@ import {
   handleMcpRemove,
   handleMcpSync,
   handleProviderHealth,
+  handleAccountUsage,
   handleAddAccount,
   handleScan,
   handleSetCooldown,
@@ -42,6 +44,7 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(wireAuto, handleWireAuto);
   plugin.handle(setCooldown, handleSetCooldown);
   plugin.handle(addAccount, handleAddAccount);
+  plugin.handle(accountUsage, handleAccountUsage);
   plugin.handle(diagnoseProvider, handleDiagnoseProvider);
   plugin.handle(providerHealth, handleProviderHealth);
   plugin.handle(mcpMatrix, handleMcpMatrix);
