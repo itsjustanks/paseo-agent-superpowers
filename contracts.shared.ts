@@ -13,6 +13,7 @@ export const SlotSchema = z.object({
   cooldownUntil: z.number(), // epoch seconds; 0 = available
   launches: z.number(), // agents this account has been handed by the router
   lastUsed: z.number(), // epoch seconds; 0 = never
+  creditNote: z.string(), // "" when fine, else e.g. "out of credits"
 });
 export type Slot = z.infer<typeof SlotSchema>;
 
@@ -30,6 +31,7 @@ export const scan = defineRpc({
   output: z.object({
     slots: z.array(SlotSchema),
     primaryAccounts: z.object({ claude: z.string(), codex: z.string() }),
+    primaryCreditNote: z.string(),
     autoRouters: z.array(AutoRouterSchema),
     agentAuthInstalled: z.boolean(),
     needsRestart: z.boolean(),

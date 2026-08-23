@@ -119,12 +119,25 @@ function slotLoggedIn(provider: "claude" | "codex", dir: string, accountEmail: s
   return existsSync(join(dir, "auth.json"));
 }
 
+// Claude records why extra usage is unavailable in its own config — a
+// token-free signal that an account has hit a spend limit.
+function creditNote(provider: "claude" | "codex", dir: string): string {
+  if (provider !== "claude") return "";
+  const config = readJson(dir === HOME ? join(HOME, ".claude.json") : join(dir, ".claude.json"));
+  if (!config) return "";
+  const reason = config.cachedExtraUsageDisabledReason;
+  if (typeof reason !== "string" || reason === "") return "";
+  if (reason === "out_of_credits") return "out of credits — extra usage exhausted";
+  if (reason.startsWith("org_level_disabled")) return "extra usage disabled for this org";
+  return `extra usage unavailable (${reason})`;
+}
+
 function envVarFor(provider: "claude" | "codex"): string {
   return provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
 }
 
-function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed">> {
-  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed">> = [];
+function collectSlots(): Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote">> {
+  const slots: Array<Omit<Slot, "wiredProviderId" | "cooldownUntil" | "launches" | "lastUsed" | "creditNote">> = [];
   const seen = new Set<string>();
   const add = (provider: "claude" | "codex", dir: string, source: "agent-link" | "external") => {
     if (seen.has(dir)) return;
@@ -563,10 +576,13 @@ function autoLauncherPath(provider: "claude" | "codex"): string {
 // A provider is the auto-router for `provider` when its command points at that
 // provider's launcher.
 function autoWiredId(overrides: ProviderOverrides, provider: "claude" | "codex"): string | null {
-  const launcher = autoLauncherPath(provider);
+  // Match by launcher filename, not full path: an install whose home differs
+  // (~/.agent-auth vs ~/.agent-link) is still the same wired router, and the
+  // exact-path compare made a wired provider look unwired.
+  const suffix = `/${provider}-auto`;
   for (const [id, override] of Object.entries(overrides)) {
     const command = (override as { command?: string[] } | undefined)?.command;
-    if (command?.some((part) => part === launcher)) return id;
+    if (command?.some((part) => part.endsWith(suffix))) return id;
   }
   return null;
 }
@@ -578,6 +594,7 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
     wiredProviderId: providerIdForDir(overrides, slot.provider, slot.dir),
     cooldownUntil: cooldownUntil(slot.provider, slot.email),
     launches: poolNumber("count", slot.provider, slot.email),
+    creditNote: creditNote(slot.provider, slot.dir),
     lastUsed: poolNumber("last", slot.provider, slot.email),
   }));
   const autoRouters = (["claude", "codex"] as const).map((provider) => ({
@@ -589,6 +606,7 @@ export async function handleScan(_input: Record<string, never>, { paseo }: Plugi
   return {
     slots,
     primaryAccounts: { claude: claudeAccountEmail(HOME), codex: codexAccountEmail(join(HOME, ".codex")) },
+    primaryCreditNote: creditNote("claude", HOME),
     autoRouters,
     agentAuthInstalled: agentLinkInstalled(),
     needsRestart,

@@ -239,12 +239,13 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     if (slot.source === "external") bits.push("external folder");
     if (slot.wiredProviderId) bits.push(`provider: ${slot.wiredProviderId}`);
     if (shared) bits.push("shares one quota with another entry");
+    if (slot.creditNote) bits.push(slot.creditNote);
     return accountRow(
       slot.dir,
       slotDot(slot),
       slot.email,
       bits.join(" · "),
-      shared || slot.wrongAccount || !slot.loggedIn,
+      shared || slot.wrongAccount || !slot.loggedIn || slot.creditNote !== "",
       slot.loggedIn ? (
         <Button
           label={parked ? "Resume" : "Park 3h"}
@@ -277,12 +278,14 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     const shared = account !== "" && isShared(provider, account);
     const bits = [`primary — what plain \`${provider}\` uses`];
     if (shared) bits.push("shares one quota with an account below");
+    const credit = provider === "claude" ? (scanQuery.data?.primaryCreditNote ?? "") : "";
+    if (credit) bits.push(credit);
     return accountRow(
       `primary-${provider}`,
       account ? STATUS.green : STATUS.orange,
       account || "not logged in",
       bits.join(" · "),
-      shared,
+      shared || credit !== "",
     );
   };
 
@@ -312,11 +315,8 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           {distinctPools === 1 ? "pool" : "pools"}
         </Text>
         <Text style={styles.muted}>
-          A rate limit belongs to an account, so entries signed into the same account share one limit. Paseo does not fail
-          over on its own: an agent that hits a limit stops and keeps its workspace — an orchestrator (or you) re-dispatches
-          it to another pool. Paseo's own usage figure tracks the primary accounts only, not these pools. Wire the
-          auto-router and new agents spread across accounts by themselves; park an account that hits its limit and
-          routing skips it until it recovers.
+          Paseo never fails over by itself — an agent that hits a limit stops and keeps its workspace. Wire the auto-router
+          so new agents rotate across accounts, and park one that runs out.
         </Text>
       </View>
 
