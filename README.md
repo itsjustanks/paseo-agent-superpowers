@@ -56,6 +56,16 @@ Requires Paseo ≥ 0.5 with plugins enabled (Settings → Plugins). Tested again
 
 [**agent-link**](https://github.com/itsjustanks/agent-link) is the companion CLI that creates and logs in account slots (`agent-link add claude you@work.com`) and can hot-switch which account the plain `claude` / `codex` command uses. The plugin is fully standalone without it — it reads whatever slots exist and does its own MCP sync — but with agent-link installed, logins become one command and the panel points you at it. The panel also reads hand-rolled slot layouts in `~/.claude-accounts` / `~/.codex-accounts`.
 
+### Authentication by account
+
+MCP *definitions* sync between accounts; MCP *grants* do not — a server is authorized once per account, which is what "server X is not connected" actually means. The MCP tab lists every account with how many servers it defines and which still need signing in, plus the exact command:
+
+```sh
+CLAUDE_CONFIG_DIR="~/.agent-link/accounts/claude/you@work.com" claude mcp login <server>
+```
+
+Project-scoped servers (defined in a repo's `.mcp.json`) are listed too, since they also need authorizing per account even though this plugin never edits them.
+
 ### Scope: user-level, not project-level
 
 The MCP tab manages **user-level** (global) servers — each provider's own config, available in all your projects. A repo's own project-level servers (`.mcp.json` in the repository) belong to that repo and are never read or written.

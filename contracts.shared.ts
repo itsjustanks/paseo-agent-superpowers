@@ -182,6 +182,24 @@ export const mcpRemove = defineRpc({
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
+export const McpAuthAccountSchema = z.object({
+  email: z.string(),
+  dir: z.string(),
+  isPrimary: z.boolean(),
+  definedServers: z.number(),
+  needsAuth: z.array(z.string()),
+});
+export type McpAuthAccount = z.infer<typeof McpAuthAccountSchema>;
+
+export const mcpAuth = defineRpc({
+  name: "superpowers.mcp-auth",
+  input: z.object({}),
+  output: z.object({
+    accounts: z.array(McpAuthAccountSchema),
+    projectServers: z.array(z.object({ project: z.string(), name: z.string() })),
+  }),
+});
+
 export const mcpSync = defineRpc({
   name: "superpowers.mcp-sync",
   input: z.object({}),

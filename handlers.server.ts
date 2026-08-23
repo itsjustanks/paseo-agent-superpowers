@@ -1285,6 +1285,56 @@ const SYNC_PROJECT_FIELDS = [
   "dontCrawlDirectory",
 ];
 
+// Which MCP servers each ACCOUNT still has to authorize. Claude records this
+// per config dir, so it is readable without touching a token — and it is the
+// answer to "server X says not connected".
+export async function handleMcpAuth() {
+  const readNeeds = (dir: string): string[] => {
+    const data = readJson(join(dir, "mcp-needs-auth-cache.json"));
+    return data ? Object.keys(data) : [];
+  };
+  const countServers = (configPath: string): number => Object.keys(jsonMcpRead(configPath)).length;
+  const accounts = [] as Array<{ email: string; dir: string; isPrimary: boolean; definedServers: number; needsAuth: string[] }>;
+  const primaryEmail = claudeAccountEmail(HOME);
+  if (primaryEmail) {
+    accounts.push({
+      email: primaryEmail,
+      dir: join(HOME, ".claude"),
+      isPrimary: true,
+      definedServers: countServers(join(HOME, ".claude.json")),
+      needsAuth: readNeeds(join(HOME, ".claude")),
+    });
+  }
+  for (const slot of collectSlots()) {
+    if (slot.provider !== "claude") continue;
+    accounts.push({
+      email: slot.email,
+      dir: slot.dir,
+      isPrimary: false,
+      definedServers: countServers(join(slot.dir, ".claude.json")),
+      needsAuth: readNeeds(slot.dir),
+    });
+  }
+  // Project-scoped servers live in a repo's .mcp.json — not managed here, but
+  // they still need authorizing per account, so they must be visible.
+  const projectServers: Array<{ project: string; name: string }> = [];
+  const roots = [join(HOME, ".superset", "projects"), join(HOME, "projects"), join(HOME, "code")];
+  for (const root of roots) {
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const file = join(root, entry, ".mcp.json");
+      if (!existsSync(file)) continue;
+      for (const name of Object.keys(jsonMcpRead(file))) projectServers.push({ project: entry, name });
+    }
+  }
+  return { accounts, projectServers };
+}
+
 export async function handleMcpSync(): Promise<{ ok: boolean; log: string }> {
   const logs: string[] = [];
   const slots = collectSlots();

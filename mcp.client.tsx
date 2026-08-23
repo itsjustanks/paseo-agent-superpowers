@@ -6,6 +6,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
   mcpAdd,
   mcpApply,
+  mcpAuth,
   mcpDefAll,
   mcpEditOne,
   mcpHealth,
@@ -55,6 +56,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
   const callMatrix = useRpc(mcpMatrix);
   const callAdd = useRpc(mcpAdd);
   const callApply = useRpc(mcpApply);
+  const callAuth = useRpc(mcpAuth);
   const callRemove = useRpc(mcpRemove);
   const callSync = useRpc(mcpSync);
   const callDefAll = useRpc(mcpDefAll);
@@ -94,6 +96,7 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
   const [formTargets, setFormTargets] = useState<Set<string>>(new Set());
 
   const matrixQuery = useQuery({ queryKey: ["superpowers", "mcp-matrix"], queryFn: () => callMatrix({}) });
+  const authQuery = useQuery({ queryKey: ["superpowers", "mcp-auth"], queryFn: () => callAuth({}) });
   const destinations = matrixQuery.data?.destinations ?? [];
   const servers = matrixQuery.data?.servers ?? [];
   const destById = (id: string) => destinations.find((dest) => dest.id === id);
@@ -462,6 +465,45 @@ export function McpSurface({ theme, layout }: PluginSurfaceProps) {
               disabled={addMutation.isPending || !formName.trim()}
             />
           </View>
+        </View>
+      ) : null}
+
+      {authQuery.data ? (
+        <View style={styles.card}>
+          <Text style={styles.strong}>Authentication by account</Text>
+          <Text style={styles.muted}>
+            A server has to be authorized once per account — that is what "not connected" means. Definitions sync; grants
+            do not.
+          </Text>
+          {authQuery.data.accounts.map((account) => (
+            <View key={account.dir} style={{ gap: 3, paddingTop: 4 }}>
+              <View style={styles.row}>
+                <Dot color={account.needsAuth.length === 0 ? theme.colors.accent : theme.colors.statusDanger} />
+                <Text style={styles.strong}>{account.email}</Text>
+                {account.isPrimary ? <Badge label="primary" theme={theme} tone="accent" /> : null}
+                <Text style={styles.muted}>
+                  {account.definedServers} servers ·{" "}
+                  {account.needsAuth.length === 0 ? "all authorized" : `${account.needsAuth.length} need sign-in`}
+                </Text>
+              </View>
+              {account.needsAuth.length > 0 ? (
+                <>
+                  <Text style={styles.danger}>{account.needsAuth.join(", ")}</Text>
+                  <Text style={styles.monoText}>
+                    {account.isPrimary
+                      ? `claude mcp login ${account.needsAuth[0]}`
+                      : `CLAUDE_CONFIG_DIR="${account.dir}" claude mcp login ${account.needsAuth[0]}`}
+                  </Text>
+                </>
+              ) : null}
+            </View>
+          ))}
+          {authQuery.data.projectServers.length > 0 ? (
+            <Text style={styles.muted}>
+              Project-scoped servers (defined in a repo's .mcp.json, not managed here):{" "}
+              {[...new Set(authQuery.data.projectServers.map((entry) => entry.name))].join(", ")}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
