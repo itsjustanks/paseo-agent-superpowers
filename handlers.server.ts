@@ -1,5 +1,5 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
@@ -666,33 +666,20 @@ export async function handleAddAccount({ provider, email }: { provider: "claude"
     return { ok: false, started: false, message: error instanceof Error ? error.message : String(error) };
   }
 
-  const bin = searchPath()
-    .map((entry) => join(entry, provider))
-    .find((candidate) => existsSync(candidate));
-  if (!bin) {
-    return {
-      ok: true,
-      started: false,
-      message: `slot created. The ${provider} CLI is not on the daemon's PATH, so finish in a terminal: agent-link login ${provider} ${email}`,
-    };
-  }
-  try {
-    const env = { ...process.env, [envVarFor(provider)]: dir };
-    const args = provider === "claude" ? ["auth", "login", "--email", email] : ["login"];
-    const child = spawn(bin, args, { env, detached: true, stdio: "ignore" });
-    child.unref();
-    return {
-      ok: true,
-      started: true,
-      message: `sign in as ${email} in the browser window that opens, then press Refresh. If nothing opens, run: agent-link login ${provider} ${email}`,
-    };
-  } catch (error) {
-    return {
-      ok: true,
-      started: false,
-      message: `slot created, but the login could not be started (${error instanceof Error ? error.message : String(error)}). Run: agent-link login ${provider} ${email}`,
-    };
-  }
+  // Deliberately do NOT spawn the login here. Both CLIs finish sign-in by having
+  // you paste a code back into the terminal, which a detached process cannot
+  // receive — it would sit there looking busy and never complete. Create the
+  // slot, hand over the exact command.
+  const cli = searchPath().some((entry) => existsSync(join(entry, "agent-link"))) ? "agent-link" : null;
+  return {
+    ok: true,
+    started: false,
+    message: cli
+      ? `Slot created. Finish in a terminal: agent-link login ${provider} ${email}`
+      : `Slot created. Finish in a terminal: ${envVarFor(provider)}="${dir}" ${provider} ${
+          provider === "claude" ? `auth login --email ${email}` : "login"
+        }`,
+  };
 }
 
 export async function handleSetCooldown({

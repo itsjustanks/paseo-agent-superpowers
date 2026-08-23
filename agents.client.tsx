@@ -204,7 +204,7 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
                 <Button label="Cancel" kind="quiet" theme={theme} onPress={() => setAddingFor(null)} />
               </View>
               <Text style={styles.muted}>
-                Opens that CLI's own browser login. Sign in as exactly this account — the panel flags a mismatch.
+Creates the slot and gives you the one command to finish the browser sign-in — that step needs a terminal because the CLI asks you to paste a code back.
               </Text>
             </View>
           ) : (
