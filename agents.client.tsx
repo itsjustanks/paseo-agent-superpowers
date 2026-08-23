@@ -182,15 +182,15 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           accountRow(
             `auto-${provider}`,
             auto.wiredProviderId ? STATUS.green : theme.colors.foregroundMuted,
-            "Auto-router",
+            "Dynamic Agent Link",
             auto.wiredProviderId
-              ? `wired as ${auto.wiredProviderId} · new agents rotate across these accounts`
+              ? `installed as "${provider === "claude" ? "Claude" : "Codex"} (Dynamic Agent Link)" · new agents rotate across these accounts`
               : auto.launcherExists
-                ? "one provider that rotates new agents across these accounts"
+                ? `install one provider that rotates new agents across these accounts`
                 : "run `agent-link auto` in a terminal to enable",
             false,
             auto.wiredProviderId ? undefined : auto.launcherExists ? (
-              <Button label="Wire" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
+              <Button label="Install" theme={theme} onPress={() => autoMutation.mutate(provider as "claude" | "codex")} />
             ) : undefined,
           )
         ) : null}
@@ -397,7 +397,7 @@ Creates the slot and gives you the one command to finish the browser sign-in —
         </Pressable>
         {showHelp ? (
           <View style={{ gap: 4 }}>
-            <Text style={styles.muted}>1. Wire the auto-router on each provider below, then pick that provider when you start agents.</Text>
+            <Text style={styles.muted}>1. Install the Dynamic Agent Link provider below, then pick it in Paseo when starting agents.</Text>
             <Text style={styles.muted}>2. Add accounts with + Add account; finish the browser sign-in with the command it gives you.</Text>
             <Text style={styles.muted}>3. Accounts refused for a limit park themselves — later launches skip them with no action from you.</Text>
             <Text style={styles.muted}>4. 7-day usage reads each account's own transcripts: sessions, tokens and models it ran.</Text>
