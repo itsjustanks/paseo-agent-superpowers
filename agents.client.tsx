@@ -22,7 +22,13 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
 
   const scanQuery = useQuery({ queryKey: ["superpowers", "scan"], queryFn: () => callScan({}) });
-  const healthQuery = useQuery({ queryKey: ["superpowers", "provider-health"], queryFn: () => callHealth({}) });
+  // Diagnostics spawn a real process per provider — for ACP providers (kimi,
+  // grok) that starts an agent session. Only on request, never on mount.
+  const healthQuery = useQuery({
+    queryKey: ["superpowers", "provider-health"],
+    queryFn: () => callHealth({}),
+    enabled: false,
+  });
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["superpowers"] });
 
   const wireMutation = useMutation({
@@ -112,7 +118,11 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
           <View style={styles.row}>
             <Dot color={health ? (health.ok ? STATUS.green : STATUS.red) : theme.colors.foregroundMuted} />
             <Text style={styles.strong}>{title}</Text>
-            {health ? <Text style={health.ok ? styles.muted : styles.danger}>{health.summary}</Text> : <Text style={styles.muted}>checking…</Text>}
+            {health ? (
+              <Text style={health.ok ? styles.muted : styles.danger}>{health.summary}</Text>
+            ) : (
+              <Text style={styles.muted}>{healthQuery.isFetching ? "checking…" : ""}</Text>
+            )}
           </View>
           {diagnoseBtn(provider, provider)}
         </View>
@@ -254,7 +264,16 @@ export function AgentSyncSurface({ theme, layout }: PluginSurfaceProps) {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Agent Link</Text>
-        <Btn label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
+        <View style={styles.row}>
+          <Btn
+            label={healthQuery.isFetching ? "Checking…" : "Check health"}
+            onPress={() => void healthQuery.refetch()}
+            theme={theme}
+            kind="quiet"
+            disabled={healthQuery.isFetching}
+          />
+          <Btn label="Refresh" onPress={refresh} theme={theme} kind="quiet" />
+        </View>
       </View>
       <Text style={styles.subtitle}>
         Every provider and the accounts under it. A rate limit belongs to an account, so two entries on the same account
